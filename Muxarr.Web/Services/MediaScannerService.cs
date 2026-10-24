@@ -198,7 +198,7 @@ public class MediaScannerService(
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var scanned = 0;
 
-        foreach (var file in Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories))
+        foreach (var file in FileHelper.EnumerateFilesRecursive(directory, "*.*"))
         {
             if (token.IsCancellationRequested)
             {

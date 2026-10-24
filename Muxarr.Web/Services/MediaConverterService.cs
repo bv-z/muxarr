@@ -857,50 +857,63 @@ public class MediaConverterService(
                 continue;
             }
 
-            // Clean up orphaned temp files from conversions
-            foreach (var muxtmpFile in Directory.EnumerateFiles(directory, "*.muxtmp", SearchOption.AllDirectories))
+            try
             {
-                logger.LogInformation("Removing leftover temp file {MuxtmpFile}", muxtmpFile);
+                CleanupLeftovers(directory);
+            }
+            catch (Exception ex)
+            {
+                // One bad folder must not stop the others from getting their backups restored.
+                logger.LogError(ex, "Could not check {Directory} for leftover conversion files", directory);
+            }
+        }
+    }
+
+    private void CleanupLeftovers(string directory)
+    {
+        // Clean up orphaned temp files from conversions
+        foreach (var muxtmpFile in FileHelper.EnumerateFilesRecursive(directory, "*.muxtmp"))
+        {
+            logger.LogInformation("Removing leftover temp file {MuxtmpFile}", muxtmpFile);
+            try
+            {
+                File.Delete(muxtmpFile);
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Failed to delete {MuxtmpFile}", muxtmpFile);
+            }
+        }
+
+        foreach (var muxbakFile in FileHelper.EnumerateFilesRecursive(directory, "*.muxbak"))
+        {
+            var originalPath = muxbakFile[..^".muxbak".Length];
+
+            if (File.Exists(originalPath))
+            {
+                // New file exists alongside backup - safe to remove the backup.
+                logger.LogInformation("Removing leftover backup {MuxbakFile} (original exists)", muxbakFile);
                 try
                 {
-                    File.Delete(muxtmpFile);
+                    File.Delete(muxbakFile);
                 }
                 catch (Exception ex)
                 {
-                    logger.LogDebug(ex, "Failed to delete {MuxtmpFile}", muxtmpFile);
+                    logger.LogDebug(ex, "Failed to delete {MuxbakFile}", muxbakFile);
                 }
             }
-
-            foreach (var muxbakFile in Directory.EnumerateFiles(directory, "*.muxbak", SearchOption.AllDirectories))
+            else
             {
-                var originalPath = muxbakFile[..^".muxbak".Length];
-
-                if (File.Exists(originalPath))
+                // Original is gone - restore from backup.
+                logger.LogWarning("Restoring {MuxbakFile} to {OriginalPath} (original missing)", muxbakFile,
+                    originalPath);
+                try
                 {
-                    // New file exists alongside backup - safe to remove the backup.
-                    logger.LogInformation("Removing leftover backup {MuxbakFile} (original exists)", muxbakFile);
-                    try
-                    {
-                        File.Delete(muxbakFile);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogDebug(ex, "Failed to delete {MuxbakFile}", muxbakFile);
-                    }
+                    File.Move(muxbakFile, originalPath);
                 }
-                else
+                catch (Exception e)
                 {
-                    // Original is gone - restore from backup.
-                    logger.LogWarning("Restoring {MuxbakFile} to {OriginalPath} (original missing)", muxbakFile,
-                        originalPath);
-                    try
-                    {
-                        File.Move(muxbakFile, originalPath);
-                    }
-                    catch (Exception e)
-                    {
-                        logger.LogError(e, "Failed to restore {MuxbakFile}", muxbakFile);
-                    }
+                    logger.LogError(e, "Failed to restore {MuxbakFile}", muxbakFile);
                 }
             }
         }
