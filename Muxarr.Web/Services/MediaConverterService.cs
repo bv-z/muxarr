@@ -459,9 +459,7 @@ public class MediaConverterService(
         // ffmpeg stream-copy so the container and every codec survive
         // byte-identical.
         var useFFmpeg = conversion.MediaFile.Snapshot.ContainerType.ToContainerFamily() != ContainerFamily.Matroska;
-        var conversionTimeout = Config.ConversionTimeoutMinutes > 0
-            ? TimeSpan.FromMinutes(Config.ConversionTimeoutMinutes)
-            : (TimeSpan?)null;
+        var conversionTimeout = Config.ConversionTimeout;
 
         var tmp = conversion.MediaFile.Path + ".muxtmp";
         try
