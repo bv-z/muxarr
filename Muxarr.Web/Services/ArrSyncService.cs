@@ -25,20 +25,28 @@ public class ArrSyncService(
 
         _lastSync = context.Configs.Get<DateTime?>("LastArrSync") ?? DateTime.MinValue;
 
-        if (DateTime.UtcNow - _lastSync > TimeSpan.FromMinutes(5))
+        if (DateTime.UtcNow - _lastSync <= TimeSpan.FromMinutes(5))
+        {
+            return;
+        }
+
+        // Only a sync that reached an arr holds off the next one. The run at the first start
+        // comes before Sonarr and Radarr are set up, and must not leave the scan after setup
+        // without original languages.
+        if (await SyncArrs(context, token))
         {
             _lastSync = DateTime.UtcNow;
             context.Configs.Set(_lastSync, "LastArrSync");
             await context.SaveChangesAsync(token);
-
-            await SyncArrs(context, token);
         }
     }
 
-    private async Task SyncArrs(AppDbContext context, CancellationToken token)
+    // True when at least one arr was read.
+    private async Task<bool> SyncArrs(AppDbContext context, CancellationToken token)
     {
         var integrations = await context.Integrations.ToListAsync(token);
         var mappings = context.Configs.GetOrDefault<PathMappingConfig>().Mappings;
+        var synced = false;
 
         foreach (var integration in integrations)
         {
@@ -52,6 +60,12 @@ public class ArrSyncService(
                 if (integration.Type == IntegrationType.Radarr)
                 {
                     var result = await arrApi.SyncMovies(integration);
+                    if (result == null)
+                    {
+                        logger.LogWarning("Could not read the movies from {Name}, keeping what Muxarr knew", integration.Name);
+                        continue;
+                    }
+
                     if (result.Count > 0)
                     {
                         logger.LogInformation("Synced {Count} movie(s) from {Name}", result.Count, integration.Name);
@@ -70,6 +84,12 @@ public class ArrSyncService(
                 else
                 {
                     var result = await arrApi.SyncSeries(integration);
+                    if (result == null)
+                    {
+                        logger.LogWarning("Could not read the series from {Name}, keeping what Muxarr knew", integration.Name);
+                        continue;
+                    }
+
                     if (result.Count > 0)
                     {
                         logger.LogInformation("Synced {Count} series from {Name}", result.Count, integration.Name);
@@ -85,12 +105,16 @@ public class ArrSyncService(
                         Title = x.Title
                     }), integration.Id, token);
                 }
+
+                synced = true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogError(ex, "Failed to sync {Name}, skipping", integration.Name);
             }
         }
+
+        return synced;
     }
 
     private static async Task SyncMedia(AppDbContext context, IEnumerable<MediaInfo> newMedia, int externalServiceId,
