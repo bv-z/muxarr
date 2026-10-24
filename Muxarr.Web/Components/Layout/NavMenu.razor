@@ -75,8 +75,12 @@
             }
         </ul>
         <div class="d-flex align-items-center justify-content-between mux-footer-meta">
-            <a href="https://github.com/KirovAir/muxarr" target="_blank"
-               class="mux-version text-decoration-none">v@(AppInfo.Version)</a>
+            <div class="d-flex flex-column">
+                <a href="https://github.com/KirovAir/muxarr" target="_blank"
+                   class="mux-version text-decoration-none">v@(AppInfo.Version)</a>
+                <a href="https://github.com/bv-z/muxarr/tree/personal" target="_blank"
+                   class="mux-version text-decoration-none">bv-z custom</a>
+            </div>
             <button class="btn btn-link text-light p-0 mux-footer-btn d-none d-md-inline-flex"
                     @onclick="ToggleDesktopCollapse"
                     title="@(_isDesktopCollapsed ? "Expand" : "Collapse")">
