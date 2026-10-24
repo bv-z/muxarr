@@ -373,7 +373,42 @@ public class MediaConverterService(
                            (x.State == ConversionState.New || x.State == ConversionState.Processing));
     }
 
+    // The remux catches its own failures. This also settles the steps before and around it (the
+    // rescan, the in-place metadata edit, measuring the tracks), which otherwise left the row queued
+    // or Processing and stopped the queue until something else woke it.
     private async Task HandleConversion(MediaConversion conversion, AppDbContext context, IServiceScope scope,
+        CancellationToken token)
+    {
+        try
+        {
+            await HandleConversionCore(conversion, context, scope, token);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            conversion.LogError(
+                $"Something bad happened while processing {conversion.MediaFile?.Path}. Error: {e.Message}", logger);
+            try
+            {
+                context.Update(conversion);
+                await context.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (Exception saveError)
+            {
+                logger.LogError(saveError, "Could not save the failure of conversion {Id}", conversion.Id);
+            }
+
+            try
+            {
+                ConverterStateChanged?.Invoke(new ConverterProgressEvent(conversion));
+            }
+            catch (Exception notifyError)
+            {
+                logger.LogWarning(notifyError, "A listener failed on conversion {Id}", conversion.Id);
+            }
+        }
+    }
+
+    private async Task HandleConversionCore(MediaConversion conversion, AppDbContext context, IServiceScope scope,
         CancellationToken token)
     {
         if (conversion.MediaFile == null)
