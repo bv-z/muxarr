@@ -34,12 +34,13 @@ public class ArrApiClient
         return result != null;
     }
 
-    public async Task<List<SeriesResponse>> SyncSeries(IApiCredentials config)
+    // Null when Sonarr could not be read in full, so a failed sync is not taken as an empty library.
+    public async Task<List<SeriesResponse>?> SyncSeries(IApiCredentials config)
     {
         var data = await Get<List<SeriesResponse>>(config, SeriesUrl);
         if (data == null)
         {
-            return [];
+            return null;
         }
 
         var epResult = new List<SeriesResponse>();
@@ -49,7 +50,7 @@ public class ArrApiClient
             var episodes = await Get<List<EpisodeResponse>>(config, url);
             if (episodes == null)
             {
-                continue;
+                return null;
             }
 
             foreach (var episode in episodes)
@@ -87,10 +88,10 @@ public class ArrApiClient
         return epResult;
     }
 
-    public async Task<List<MovieResponse>> SyncMovies(IApiCredentials config)
+    // Null when Radarr could not be read, so a failed sync is not taken as an empty library.
+    public Task<List<MovieResponse>?> SyncMovies(IApiCredentials config)
     {
-        var data = await Get<List<MovieResponse>>(config, MovieUrl);
-        return data ?? [];
+        return Get<List<MovieResponse>>(config, MovieUrl);
     }
 
     public Task<List<SeriesResponse>?> GetSeries(IApiCredentials config)
