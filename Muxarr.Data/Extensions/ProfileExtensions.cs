@@ -8,7 +8,7 @@ public static class ProfileExtensions
     public static Profile? GetBestCandidate(this IEnumerable<Profile> list, string path)
     {
         return list.FirstOrDefault(x =>
-            x.Directories.Any(y => path.StartsWith(y, StringComparison.InvariantCultureIgnoreCase)));
+            x.Directories.Any(y => path.IsInDirectory(y, StringComparison.InvariantCultureIgnoreCase)));
     }
 
     public static Profile Clone(this Profile profile)

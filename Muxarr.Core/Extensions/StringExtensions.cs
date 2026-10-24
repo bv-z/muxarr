@@ -7,6 +7,18 @@ public static class StringExtensions
         return !source.EndsWith(value) ? source : source.Remove(source.LastIndexOf(value, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Whether the path is the directory or inside it. "/data/tv" holds
+    /// "/data/tv/Show/S01E01.mkv" but not "/data/tv-kids/Show/S01E01.mkv".
+    /// </summary>
+    public static bool IsInDirectory(this string path, string directory,
+        StringComparison comparison = StringComparison.Ordinal)
+    {
+        var dir = directory.TrimEnd('/', '\\');
+        return path.StartsWith(dir, comparison)
+               && (path.Length == dir.Length || path[dir.Length] is '/' or '\\');
+    }
+
     public static string SanitizeUrl(this string url)
     {
         return new string(url.Where(c => !char.IsWhiteSpace(c)).ToArray()).TrimEnd('/');
