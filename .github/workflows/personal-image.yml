@@ -1,0 +1,92 @@
+name: Personal image
+
+# Builds this fork's personal branch and publishes it as
+# ghcr.io/<owner>/muxarr:personal, so Unraid can update it like any other image.
+# The upstream Build and Deploy workflow only runs for master and is left alone.
+
+on:
+    push:
+        branches:
+            - personal
+    workflow_dispatch:
+
+concurrency:
+    group: personal-image
+    cancel-in-progress: true
+
+env:
+    FFMPEG_VERSION: '8.1'
+    DOTNET_VERSION: '10.0.x'
+
+jobs:
+    test:
+        runs-on: ubuntu-24.04
+        steps:
+            -   name: Checkout code
+                uses: actions/checkout@v5
+
+            -   name: Install mkvtoolnix
+                run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mkvtoolnix
+
+            -   name: Install ffmpeg ${{ env.FFMPEG_VERSION }}
+                run: |
+                    set -euo pipefail
+                    url="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n${FFMPEG_VERSION}-latest-linux64-gpl-${FFMPEG_VERSION}.tar.xz"
+                    curl -fsSL "$url" -o /tmp/ffmpeg.tar.xz
+                    sudo tar -xJf /tmp/ffmpeg.tar.xz -C /usr/local/bin --strip-components=2 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'
+                    ffmpeg -version | head -1
+
+            -   name: Setup .NET 10
+                uses: actions/setup-dotnet@v5
+                with:
+                    dotnet-version: ${{ env.DOTNET_VERSION }}
+
+            -   name: Run tests
+                run: dotnet test --configuration Release
+
+    build:
+        needs: test
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            -   name: Lowercase image name
+                run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+            -   name: Checkout code
+                uses: actions/checkout@v5
+
+            -   name: Setup .NET 10
+                uses: actions/setup-dotnet@v5
+                with:
+                    dotnet-version: ${{ env.DOTNET_VERSION }}
+
+            -   name: Publish .NET app
+                run: dotnet publish Muxarr.Web/Muxarr.Web.csproj -c Release -o Muxarr.Web/publish
+
+            -   name: Set up Docker Buildx
+                uses: docker/setup-buildx-action@v4
+
+            -   name: Log in to GitHub Container Registry
+                uses: docker/login-action@v4
+                with:
+                    registry: ghcr.io
+                    username: ${{ github.actor }}
+                    password: ${{ secrets.GITHUB_TOKEN }}
+
+            -   name: Build and push
+                uses: docker/build-push-action@v7
+                with:
+                    context: Muxarr.Web
+                    platforms: linux/amd64
+                    build-args: FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
+                    push: true
+                    tags: |
+                        ${{ env.IMAGE }}:personal
+                        ${{ env.IMAGE }}:personal-${{ github.sha }}
+                    labels: |
+                        org.opencontainers.image.source=https://github.com/${{ github.repository }}
+                        org.opencontainers.image.revision=${{ github.sha }}
+                    cache-from: type=gha,scope=personal
+                    cache-to: type=gha,scope=personal,mode=max
