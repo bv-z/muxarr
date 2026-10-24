@@ -49,6 +49,26 @@ public class SwapSafetyTests : IntegrationTestBase
         FileAssertions.AssertNoStrayArtifacts(TempDir, Path.GetFileName(path));
     }
 
+    [TestMethod]
+    public async Task ConvertedFile_KeepsTheOriginalsPermissions()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Unix permissions only");
+        }
+
+        var path = CopyFixture("test_complex.mkv");
+        const UnixFileMode shareMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead |
+                                       UnixFileMode.GroupWrite | UnixFileMode.OtherRead | UnixFileMode.OtherWrite;
+        File.SetUnixFileMode(path, shareMode);
+        var conversion = await QueueDroppingASubtitle(path);
+
+        await Fixture.Converter.RunAsync(CancellationToken.None);
+
+        await Fixture.AssertStateAsync(conversion.Id, ConversionState.Completed);
+        Assert.AreEqual(shareMode, File.GetUnixFileMode(path));
+    }
+
     private async Task<MediaConversion> QueueDroppingASubtitle(string path)
     {
         var profile = await Fixture.SeedProfile();
