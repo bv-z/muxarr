@@ -42,6 +42,23 @@ public static class FileHelper
     }
 
     /// <summary>
+    /// Every file under the directory that matches the pattern, like
+    /// <see cref="SearchOption.AllDirectories"/>, except that a folder it may not read is
+    /// skipped instead of ending the whole walk with an exception.
+    /// </summary>
+    public static IEnumerable<string> EnumerateFilesRecursive(string directory, string pattern)
+    {
+        return Directory.EnumerateFiles(directory, pattern, new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            // What the SearchOption overload does: hidden files count, and "*.*" matches every name.
+            AttributesToSkip = 0,
+            MatchType = MatchType.Win32
+        });
+    }
+
+    /// <summary>
     /// Moves a file with progress reporting. On the same filesystem this is an instant
     /// atomic rename. On different filesystems it falls back to an async copy+delete
     /// with progress reporting and cancellation support.
