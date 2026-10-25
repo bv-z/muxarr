@@ -639,6 +639,7 @@ public class MediaConverterService(
         conversion.AfterSnapshot = mediaFile.Snapshot;
         conversion.SizeDifference = Math.Abs(conversion.SizeBefore - conversion.SizeAfter);
         await UpdateArr(conversion, context);
+        await RunPostProcessing(conversion);
         conversion.State = ConversionState.Completed;
     }
 
