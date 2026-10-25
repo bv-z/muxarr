@@ -103,9 +103,9 @@ public class FFmpegHelperTests
     }
 
     [TestMethod]
-    public void EscapeValue_EscapesBackslashes()
+    public void EscapeValue_LeavesBackslashesThatAreNotBeforeAQuote()
     {
-        Assert.AreEqual("\"a\\\\b\"", FFmpegHelper.EscapeValue("a\\b"));
+        Assert.AreEqual("\"a\\b\"", FFmpegHelper.EscapeValue("a\\b"));
     }
 
     [TestMethod]
