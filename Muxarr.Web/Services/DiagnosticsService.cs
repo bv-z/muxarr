@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Muxarr.Core.Config;
+using Muxarr.Core.Models;
 using Muxarr.Core.Utilities;
 using Muxarr.Data;
 using Muxarr.Data.Entities;
@@ -42,6 +43,7 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         WriteDisks(sb, profiles);
         await WriteSettings(sb, context, profiles, token);
         await WriteLibrary(sb, context, token);
+        await WriteNeedingWorkAgain(sb, context, token);
         await WriteConversions(sb, context, token);
         await WriteLog(sb, context, token);
 
@@ -200,6 +202,91 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
                 sb.AppendLine($"  {path}");
             }
         }
+    }
+
+    // A file that still needs work after it was converted was either replaced since (an upgrade or
+    // re-import from Sonarr/Radarr) or converted without reaching its target, which is a Muxarr problem.
+    // Telling the two apart needs the conversion's result next to the file as it is now.
+    private static async Task WriteNeedingWorkAgain(StringBuilder sb, AppDbContext context, CancellationToken token)
+    {
+        var files = await context.MediaFiles.AsNoTracking()
+            .Include(f => f.Snapshot).ThenInclude(s => s.Tracks)
+            .Include(f => f.Profile)
+            .Where(f => f.HasRedundantTracks || f.HasNonStandardMetadata || f.HasRemovableChapters)
+            .OrderBy(f => f.Path)
+            .ToListAsync(token);
+        var conversions = await context.MediaConversions.AsNoTracking()
+            .Include(c => c.AfterSnapshot).ThenInclude(s => s!.Tracks)
+            .Where(c => c.State == ConversionState.Completed)
+            .OrderByDescending(c => c.Id)
+            .ToListAsync(token);
+
+        var never = 0;
+        var replaced = new List<string>();
+        var unchanged = new List<string>();
+        foreach (var file in files)
+        {
+            var byFile = conversions.FirstOrDefault(c => c.MediaFileId == file.Id);
+            var byTitle = byFile == null && !string.IsNullOrEmpty(file.Title)
+                ? conversions.FirstOrDefault(c => c.Name == file.Title)
+                : null;
+            var last = byFile ?? byTitle;
+            if (last == null)
+            {
+                never++;
+                continue;
+            }
+
+            // A swap or an in-place edit ends with the file at SizeAfter, written before UpdatedDate.
+            var changed = byTitle != null || file.Size != last.SizeAfter
+                          || file.FileLastWriteTime > last.UpdatedDate.AddMinutes(1);
+            var entry = new StringBuilder();
+            entry.AppendLine($"--- {file.Path}");
+            entry.AppendLine($"  Converted {Time(last.UpdatedDate)} (#{last.Id}){(byTitle != null ? ", found by title: the file was replaced and is a new library entry" : "")}");
+            entry.AppendLine($"  File now: {Size(file.Size)}, modified {Time(file.FileLastWriteTime)}; after that conversion: {Size(last.SizeAfter)}" +
+                             $" -> {(changed ? "CHANGED since, most likely replaced by Sonarr/Radarr" : "unchanged, so the conversion did not reach its target")}");
+            entry.AppendLine($"  Original language: {(string.IsNullOrEmpty(file.OriginalLanguage) ? "unknown" : file.OriginalLanguage)}");
+            if (last.AfterSnapshot != null)
+            {
+                entry.AppendLine($"  After the conversion: {Tracks(last.AfterSnapshot.Tracks)}");
+            }
+
+            entry.AppendLine($"  Now:                  {Tracks(file.Snapshot?.Tracks ?? [])}");
+            if (file.Profile != null && file.Snapshot != null)
+            {
+                var keep = file.BuildTargetFromProfile(file.Profile).Tracks.Select(t => t.Index).ToHashSet();
+                var removed = file.Snapshot.Tracks.Where(t => !keep.Contains(t.Index)).ToList();
+                entry.AppendLine($"  Would remove now:     {(removed.Count > 0 ? Tracks(removed) : "nothing")}" +
+                                 (file.HasNonStandardMetadata || file.HasRemovableChapters ? "; also needs a metadata fix" : ""));
+            }
+
+            (changed ? replaced : unchanged).Add(entry.ToString());
+        }
+
+        Section(sb, "Files that need work again after a conversion");
+        sb.AppendLine($"Needing work: {files.Count}. Never converted: {never}. Converted, then replaced: {replaced.Count}. " +
+                      $"Converted and unchanged, yet still needing work: {unchanged.Count}.");
+        foreach (var entry in unchanged.Concat(replaced).Take(ListedFiles))
+        {
+            sb.Append(entry);
+        }
+    }
+
+    private static string Tracks(IEnumerable<TrackSnapshot> tracks)
+    {
+        var listed = tracks.Where(t => t.Type != MediaTrackType.Video).OrderBy(t => t.Index)
+            .Select(t =>
+            {
+                var flags = new List<string>();
+                if (t.IsForced) flags.Add("forced");
+                if (t.IsHearingImpaired) flags.Add("SDH");
+                if (t.IsCommentary) flags.Add("commentary");
+                var kind = t.Type == MediaTrackType.Audio ? "a" : "s";
+                var name = string.IsNullOrEmpty(t.Name) ? "" : $" \"{t.Name}\"";
+                return $"{kind}#{t.Index} {t.LanguageName}{name}{(flags.Count > 0 ? $" ({string.Join(", ", flags)})" : "")}";
+            })
+            .ToList();
+        return listed.Count > 0 ? string.Join(", ", listed) : "(no audio or subtitles)";
     }
 
     private static async Task WriteConversions(StringBuilder sb, AppDbContext context, CancellationToken token)
