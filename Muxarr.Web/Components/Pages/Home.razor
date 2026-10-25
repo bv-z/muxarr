@@ -29,10 +29,18 @@
                 </a>
             </div>
             <div class="col-6 col-lg">
-                <a href="/library?filter=tracks" class="card text-center text-decoration-none mux-stat-card">
+                <a href="/library?filter=audio" class="card text-center text-decoration-none mux-stat-card">
                     <div class="card-body py-3">
-                        <div class="text-muted small">Redundant Tracks</div>
-                        <div class="fs-3 fw-bold text-warning">@RedundantTrackFiles</div>
+                        <div class="text-muted small">Audio to Remove</div>
+                        <div class="fs-3 fw-bold text-warning">@RedundantAudioFiles</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-6 col-lg">
+                <a href="/library?filter=subtitles" class="card text-center text-decoration-none mux-stat-card">
+                    <div class="card-body py-3">
+                        <div class="text-muted small">Subtitles to Remove</div>
+                        <div class="fs-3 fw-bold text-warning">@RedundantSubtitleFiles</div>
                     </div>
                 </a>
             </div>
@@ -60,7 +68,8 @@
                     </div>
                 </a>
             </div>
-            <div class="col-6 col-lg">
+            @* Full width on a phone, where it would otherwise sit alone in the last row. *@
+            <div class="col-12 col-lg">
                 <a href="/conversions" class="card text-center text-decoration-none mux-stat-card">
                     <div class="card-body py-3">
                         <div class="text-muted small">Space Saved</div>
@@ -205,7 +214,8 @@
 
     private bool HasProfile { get; set; }
     private int TotalFiles { get; set; }
-    private int RedundantTrackFiles { get; set; }
+    private int RedundantAudioFiles { get; set; }
+    private int RedundantSubtitleFiles { get; set; }
     private int MetadataIssueFiles { get; set; }
     private int TotalConversions { get; set; }
     private int ActiveConversions { get; set; }
@@ -229,7 +239,8 @@
         }
 
         TotalFiles = await context.MediaFiles.CountAsync();
-        RedundantTrackFiles = await context.MediaFiles.CountAsync(f => f.HasRedundantTracks);
+        RedundantAudioFiles = await context.MediaFiles.CountAsync(f => f.HasRedundantAudio);
+        RedundantSubtitleFiles = await context.MediaFiles.CountAsync(f => f.HasRedundantSubtitles);
         MetadataIssueFiles = await context.MediaFiles
             .CountAsync(f => f.HasNonStandardMetadata || f.HasRemovableChapters);
         TotalConversions = await context.MediaConversions.CountAsync(c => c.State == ConversionState.Completed);

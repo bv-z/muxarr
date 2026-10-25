@@ -180,7 +180,8 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         Section(sb, "Library");
         var files = context.MediaFiles.AsNoTracking();
         sb.AppendLine($"Files: {await files.CountAsync(token)} (hardlinked, skipped: {await files.CountAsync(f => f.IsHardlinked, token)})");
-        sb.AppendLine($"Need track removal: {await files.CountAsync(f => f.HasRedundantTracks, token)}, " +
+        sb.AppendLine($"Need track removal: {await files.CountAsync(f => f.HasRedundantTracks, token)} " +
+                      $"(audio {await files.CountAsync(f => f.HasRedundantAudio, token)}, subtitles {await files.CountAsync(f => f.HasRedundantSubtitles, token)}), " +
                       $"need a metadata fix: {await files.CountAsync(f => f.HasNonStandardMetadata || f.HasRemovableChapters, token)}, " +
                       $"scan warnings: {await files.CountAsync(f => f.HasScanWarning, token)}");
 

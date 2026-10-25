@@ -29,11 +29,19 @@ public static class MediaFileExtensions
         return filter switch
         {
             "tracks" => query.Where(x => x.HasRedundantTracks),
+            "audio" => query.Where(x => x.HasRedundantAudio),
+            "subtitles" => query.Where(x => x.HasRedundantSubtitles),
             "metadata" => query.Where(x => x.HasNonStandardMetadata || x.HasRemovableChapters),
             "any" => query.Where(x => x.HasRedundantTracks || x.HasNonStandardMetadata || x.HasRemovableChapters),
             "warnings" => query.Where(x => x.HasScanWarning),
             _ => query
         };
+    }
+
+    // Whether the target drops any of the file's tracks of this type.
+    public static bool RemovesTracks(this MediaFile file, ConversionPlan target, MediaTrackType type)
+    {
+        return target.Tracks.Count(t => t.Type == type) < file.Snapshot.Tracks.Count(t => t.Type == type);
     }
 
     public static bool NeedsFileProbe(this MediaFile file, FileInfo fileInfo)
