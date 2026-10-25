@@ -1,17 +1,17 @@
-name: Personal image
+name: Custom image
 
-# Builds this fork's personal branch and publishes it as
-# ghcr.io/<owner>/muxarr:personal, so Unraid can update it like any other image.
+# Builds this fork's custom branch (upstream plus these fixes and features) and publishes it
+# as ghcr.io/<owner>/muxarr:custom, so Unraid can update it like any other image.
 # The upstream Build and Deploy workflow only runs for master and is left alone.
 
 on:
     push:
         branches:
-            - personal
+            - custom
     workflow_dispatch:
 
 concurrency:
-    group: personal-image
+    group: custom-image
     cancel-in-progress: true
 
 env:
@@ -83,10 +83,10 @@ jobs:
                     build-args: FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
                     push: true
                     tags: |
-                        ${{ env.IMAGE }}:personal
-                        ${{ env.IMAGE }}:personal-${{ github.sha }}
+                        ${{ env.IMAGE }}:custom
+                        ${{ env.IMAGE }}:custom-${{ github.sha }}
                     labels: |
                         org.opencontainers.image.source=https://github.com/${{ github.repository }}
                         org.opencontainers.image.revision=${{ github.sha }}
-                    cache-from: type=gha,scope=personal
-                    cache-to: type=gha,scope=personal,mode=max
+                    cache-from: type=gha,scope=custom
+                    cache-to: type=gha,scope=custom,mode=max
