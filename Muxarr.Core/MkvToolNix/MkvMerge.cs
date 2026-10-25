@@ -21,7 +21,7 @@ public static class MkvMerge
     public static async Task<ProcessJsonResult<MkvMergeInfo>> GetFileInfo(string file)
     {
         var result =
-            await ProcessExecutor.ExecuteProcessAsync(MkvMergeExecutable, $"-J \"{file}\"", TimeSpan.FromSeconds(30));
+            await ProcessExecutor.ExecuteProcessAsync(MkvMergeExecutable, $"-J {MkvToolNixHelper.EscapeValue(file)}", TimeSpan.FromSeconds(30));
         var json = new ProcessJsonResult<MkvMergeInfo>(result);
 
         if (!IsSuccess(result) || string.IsNullOrEmpty(result.Output))
@@ -53,7 +53,7 @@ public static class MkvMerge
         var audioTracks = tracks.Where(t => t.Type == MediaTrackType.Audio).ToList();
         var subtitleTracks = tracks.Where(t => t.Type == MediaTrackType.Subtitles).ToList();
 
-        var command = $"-o \"{output}\"";
+        var command = $"-o {MkvToolNixHelper.EscapeValue(output)}";
 
         if (delta.Title != null)
         {
@@ -127,7 +127,7 @@ public static class MkvMerge
             }
         }
 
-        command += $" \"{input}\"";
+        command += $" {MkvToolNixHelper.EscapeValue(input)}";
         command += $" --track-order {string.Join(",", tracks.Select(t => $"0:{t.Index}"))}";
 
         var lastProgress = 0;

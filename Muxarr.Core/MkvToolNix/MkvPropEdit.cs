@@ -21,7 +21,7 @@ public static class MkvPropEdit
     {
         _ = output;
 
-        var command = $"\"{input}\"";
+        var command = MkvToolNixHelper.EscapeValue(input);
         var editCount = 0;
 
         foreach (var track in delta.Tracks)
