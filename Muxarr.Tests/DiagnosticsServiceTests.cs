@@ -109,6 +109,50 @@ public class DiagnosticsServiceTests
     }
 
     [TestMethod]
+    public async Task Report_TellsAReplacedFileFromOneTheConversionDidNotFinish()
+    {
+        await using (var context = new AppDbContext(_options))
+        {
+            var profile = await context.Profiles.SingleAsync();
+            profile.SubtitleSettings = new TrackSettings { Enabled = true, AllowedLanguages = [IsoLanguage.Find("English")] };
+            foreach (var (title, sizeAfter) in new[] { ("Upgraded Film", 1000L), ("Stuck Film", 2000L) })
+            {
+                var snapshot = new MediaSnapshot
+                {
+                    Tracks =
+                    [
+                        new TrackSnapshot { Index = 0, Type = Muxarr.Core.Models.MediaTrackType.Video, Codec = "hevc" },
+                        new TrackSnapshot { Index = 1, Type = Muxarr.Core.Models.MediaTrackType.Audio, LanguageName = "English", LanguageCode = "eng", Codec = "eac3" },
+                        new TrackSnapshot { Index = 2, Type = Muxarr.Core.Models.MediaTrackType.Subtitles, LanguageName = "English", LanguageCode = "eng", Codec = "srt" },
+                        new TrackSnapshot { Index = 3, Type = Muxarr.Core.Models.MediaTrackType.Subtitles, LanguageName = "Czech", LanguageCode = "cze", Codec = "srt" }
+                    ]
+                };
+                var file = new MediaFile
+                {
+                    Path = $"/data/media/bluray/{title}/{title}.mkv", Title = title, OriginalLanguage = "English",
+                    Profile = profile, Snapshot = snapshot, HasRedundantTracks = true, Size = 2000,
+                    FileLastWriteTime = DateTime.UtcNow.AddDays(-2)
+                };
+                context.MediaFiles.Add(file);
+                context.MediaConversions.Add(new MediaConversion
+                {
+                    Name = title, MediaFile = file, State = ConversionState.Completed, SizeAfter = sizeAfter,
+                    UpdatedDate = DateTime.UtcNow.AddDays(-1)
+                });
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        var report = await new DiagnosticsService(new Factory(_options)).BuildReportAsync();
+
+        StringAssert.Contains(report, "Converted, then replaced: 1. Converted and unchanged, yet still needing work: 1.");
+        StringAssert.Contains(report, "Would remove now:     s#3 Czech");
+        var stuck = report[report.IndexOf("Stuck Film.mkv", StringComparison.Ordinal)..];
+        StringAssert.Contains(stuck[..stuck.IndexOf("Original language", StringComparison.Ordinal)], "unchanged, so the conversion did not reach its target");
+    }
+
+    [TestMethod]
     public void FileName_IsDatedText()
     {
         StringAssert.Matches(DiagnosticsService.FileName(DateTime.UtcNow),
