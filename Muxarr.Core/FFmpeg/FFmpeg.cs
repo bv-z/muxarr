@@ -23,7 +23,7 @@ public static class FFmpeg
     {
         var result = await ProcessExecutor.ExecuteProcessAsync(
             FfprobeExecutable,
-            $"-v error -print_format json -show_streams -show_chapters -show_format \"{file}\"",
+            $"-v error -print_format json -show_streams -show_chapters -show_format {FFmpegHelper.EscapeValue(file)}",
             TimeSpan.FromSeconds(30));
 
         var json = new ProcessJsonResult<FFprobeResult>(result);
@@ -94,7 +94,7 @@ public static class FFmpeg
         var result = await ProcessExecutor.ExecuteProcessAsync(
             FfprobeExecutable,
             $"-v error -read_intervals \"{from}%+{span}\" " +
-            $"-show_entries packet=stream_index,pts_time,duration_time -of csv=p=0 \"{file}\"",
+            $"-show_entries packet=stream_index,pts_time,duration_time -of csv=p=0 {FFmpegHelper.EscapeValue(file)}",
             TimeSpan.FromSeconds(60));
 
         if (!IsSuccess(result) || string.IsNullOrEmpty(result.Output))
@@ -246,7 +246,7 @@ public static class FFmpeg
         var sb = new StringBuilder();
         sb.Append("-hide_banner -nostdin -nostats -loglevel info -y");
         sb.Append(" -progress pipe:1");
-        sb.Append($" -i \"{input}\"");
+        sb.Append($" -i {FFmpegHelper.EscapeValue(input)}");
 
         foreach (var track in tracks)
         {
@@ -296,7 +296,7 @@ public static class FFmpeg
             }
         }
 
-        sb.Append($" -f {muxerFormat} \"{output}\"");
+        sb.Append($" -f {muxerFormat} {FFmpegHelper.EscapeValue(output)}");
 
         return sb.ToString();
     }
