@@ -224,7 +224,32 @@
                             <MediaTrackLabels Tracks="conversion.BeforeSnapshot?.Tracks ?? []"></MediaTrackLabels>
                         </td>
                         <td data-label="After">
-                            <MediaTrackLabels Tracks="conversion.AfterSnapshot?.Tracks ?? []"></MediaTrackLabels>
+                            @if (conversion.AfterSnapshot is { Tracks.Count: > 0 })
+                            {
+                                <MediaTrackLabels Tracks="conversion.AfterSnapshot.Tracks"></MediaTrackLabels>
+                            }
+                            else if (conversion.State is ConversionState.New or ConversionState.Processing)
+                            {
+                                @* Not done yet: show what it will keep, not an empty result. *@
+                                var planned = conversion.PlannedTracks();
+                                if (planned.Count > 0)
+                                {
+                                    <span class="opacity-50"><MediaTrackLabels Tracks="planned"></MediaTrackLabels></span>
+                                    <span class="text-muted small text-nowrap">planned</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted small">@(conversion.State == ConversionState.New ? "Queued" : "In progress")</span>
+                                }
+                            }
+                            else if (conversion.State is ConversionState.Failed or ConversionState.Cancelled)
+                            {
+                                <span class="text-muted small">Unchanged</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted small">No track data</span>
+                            }
                         </td>
                     </tr>
                 }

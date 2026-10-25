@@ -31,6 +31,25 @@ public static class MediaConversionExtensions
         Log(conversion, message, logger, true);
     }
 
+    /// <summary>
+    /// The source tracks the plan keeps, in output order: what the file will have once a queued
+    /// or running conversion finishes. Empty when the conversion has no source snapshot.
+    /// </summary>
+    public static List<TrackSnapshot> PlannedTracks(this MediaConversion conversion)
+    {
+        var source = conversion.BeforeSnapshot?.Tracks;
+        if (source == null || conversion.ConversionPlan.Tracks.Count == 0)
+        {
+            return [];
+        }
+
+        var byIndex = source.GroupBy(t => t.Index).ToDictionary(g => g.Key, g => g.First());
+        return conversion.ConversionPlan.Tracks
+            .Where(t => byIndex.ContainsKey(t.Index))
+            .Select(t => byIndex[t.Index])
+            .ToList();
+    }
+
     public static string GetSizeChangePercentage(this MediaConversion conversion)
     {
         return GetSizeChangePercentage(conversion.SizeBefore, conversion.SizeAfter);
