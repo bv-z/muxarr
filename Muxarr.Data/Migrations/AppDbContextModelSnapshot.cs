@@ -222,6 +222,16 @@ namespace Muxarr.Data.Migrations
                     b.Property<bool>("HasNonStandardMetadata")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("HasRedundantAudio")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasRedundantSubtitles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("HasRedundantTracks")
                         .HasColumnType("INTEGER");
 

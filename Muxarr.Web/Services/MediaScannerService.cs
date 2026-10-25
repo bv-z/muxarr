@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Muxarr.Core.Config;
 using Muxarr.Core.Extensions;
 using Muxarr.Core.FFmpeg;
+using Muxarr.Core.Models;
 using Muxarr.Core.Utilities;
 using Muxarr.Data;
 using Muxarr.Data.Entities;
@@ -348,6 +349,8 @@ public class MediaScannerService(
     {
         var target = file.BuildTargetFromProfile(profile);
         file.HasRedundantTracks = profile != null && target.Tracks.Count < file.Snapshot.TrackCount;
+        file.HasRedundantAudio = profile != null && file.RemovesTracks(target, MediaTrackType.Audio);
+        file.HasRedundantSubtitles = profile != null && file.RemovesTracks(target, MediaTrackType.Subtitles);
         file.HasNonStandardMetadata = file.CheckHasNonStandardMetadata(profile, target);
         file.HasRemovableChapters = profile is { RemoveChapters: true } && file.Snapshot.HasChapters;
     }

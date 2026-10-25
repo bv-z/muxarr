@@ -106,7 +106,13 @@
             }
             <select class="form-select form-select-sm" style="width: auto;" @bind="FileFilter">
                 <option value="">All Files</option>
-                <option value="tracks">Needs Track Removal</option>
+                <option value="audio">Needs Audio Removal</option>
+                <option value="subtitles">Needs Subtitle Removal</option>
+                @if (FileFilter == "tracks")
+                {
+                    @* Older links and the API still use the combined filter. *@
+                    <option value="tracks">Needs Track Removal</option>
+                }
                 <option value="metadata">Needs Metadata Fix</option>
                 <option value="any">Needs Any Work</option>
                 <option value="warnings">Has Scan Warning</option>

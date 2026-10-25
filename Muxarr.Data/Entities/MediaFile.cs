@@ -14,6 +14,8 @@ public class MediaFile : AuditableEntity, IHasId
     public string? ProbeOutput { get; set; }
     public bool HasScanWarning { get; set; }
     public bool HasRedundantTracks { get; set; }
+    public bool HasRedundantAudio { get; set; }
+    public bool HasRedundantSubtitles { get; set; }
     public bool HasNonStandardMetadata { get; set; }
     public bool HasRemovableChapters { get; set; }
     public bool IsHardlinked { get; set; }
@@ -62,6 +64,14 @@ public class MediaFileConfiguration : AuditEntityConfiguration<MediaFile>
 
         builder.Property(e => e.HasRedundantTracks)
             .IsRequired();
+
+        builder.Property(e => e.HasRedundantAudio)
+            .IsRequired()
+            .HasDefaultValue(false);
+
+        builder.Property(e => e.HasRedundantSubtitles)
+            .IsRequired()
+            .HasDefaultValue(false);
 
         builder.Property(e => e.HasNonStandardMetadata)
             .IsRequired();

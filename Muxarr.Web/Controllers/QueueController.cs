@@ -16,9 +16,9 @@ public class QueueController(IDbContextFactory<AppDbContext> contextFactory, Med
     [Route("~/api/queue")]
     public async Task<IActionResult> Post([FromQuery] string filter = "any")
     {
-        if (filter is not ("any" or "tracks" or "metadata"))
+        if (filter is not ("any" or "tracks" or "audio" or "subtitles" or "metadata"))
         {
-            return BadRequest("filter must be any, tracks or metadata");
+            return BadRequest("filter must be any, tracks, audio, subtitles or metadata");
         }
 
         var token = HttpContext.RequestAborted;
