@@ -55,7 +55,7 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         var now = DateTime.UtcNow;
         var zone = TimeZoneInfo.Local;
         sb.AppendLine("Muxarr diagnostics");
-        sb.AppendLine($"Generated   {ToLocal(now):yyyy-MM-dd HH:mm:ss} ({zone.Id}, UTC{FormatOffset(zone.GetUtcOffset(now))}). Times below are in this zone, except the lines inside conversion logs, which are UTC.");
+        sb.AppendLine($"Generated   {ToLocal(now):yyyy-MM-dd HH:mm:ss} ({zone.Id}, UTC{FormatOffset(zone.GetUtcOffset(now))}). All times below are in this zone.");
         sb.AppendLine($"Version     {AppInfo.Version}{(AppInfo.Commit != null ? $" (commit {AppInfo.Commit})" : "")}");
         sb.AppendLine($"Runtime     {RuntimeInformation.FrameworkDescription}, {RuntimeInformation.OSDescription}, {RuntimeInformation.ProcessArchitecture}");
         sb.AppendLine($"Container   {(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true" ? "yes" : "no")}");
@@ -326,11 +326,26 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
             .Concat(recent.Where(c => c.State is not (ConversionState.Failed or ConversionState.Cancelled)).Take(10))
             .Take(ConversionLogs)
             .OrderByDescending(c => c.Id);
-        foreach (var c in withLogs)
+        var shown = withLogs.ToList();
+        var ids = shown.Select(c => c.Id).ToList();
+        var lines = (await context.Set<ConversionLogEntry>().AsNoTracking()
+                .Where(e => ids.Contains(e.MediaConversionId))
+                .OrderBy(e => e.Id)
+                .ToListAsync(token))
+            .ToLookup(e => e.MediaConversionId);
+        foreach (var c in shown)
         {
             sb.AppendLine();
             sb.AppendLine($"--- #{c.Id} {c.Name} - {c.State} - {c.MediaFile?.Path ?? "(file no longer in the library)"}");
-            sb.AppendLine(string.IsNullOrWhiteSpace(c.Log) ? "(no log)" : c.Log.TrimEnd());
+            if (!lines[c.Id].Any())
+            {
+                sb.AppendLine("(no log)");
+            }
+
+            foreach (var line in lines[c.Id])
+            {
+                sb.AppendLine($"[{Time(line.Timestamp)}]{(line.IsError ? " ERROR" : "")} {line.Message}");
+            }
         }
     }
 

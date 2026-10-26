@@ -5,30 +5,22 @@ namespace Muxarr.Tests;
 [TestClass]
 public class FileHelperTests : FixtureTestBase
 {
+    // DriveInfo is handed a folder, not a drive root, so this only works if that resolves to its disk.
     [TestMethod]
-    public void EnsureFreeSpace_EnoughRoom_DoesNotThrow()
+    public void GetAvailableFreeSpace_ReportsTheDiskOfAFolder()
     {
-        FileHelper.EnsureFreeSpace(TempDir, 1);
+        Assert.IsTrue(FileHelper.GetAvailableFreeSpace(TempDir) > 0);
     }
 
     [TestMethod]
-    public void EnsureFreeSpace_NotEnoughRoom_SaysHowMuchIsNeeded()
-    {
-        var ex = Assert.ThrowsExactly<IOException>(() => FileHelper.EnsureFreeSpace(TempDir, long.MaxValue));
-
-        StringAssert.Contains(ex.Message, "Not enough free space");
-        StringAssert.Contains(ex.Message, TempDir);
-    }
-
-    [TestMethod]
-    public void EnsureFreeSpace_UnknownLocation_DoesNotBlock()
+    public void GetAvailableFreeSpace_UnknownLocation_ReturnsNull()
     {
         if (OperatingSystem.IsWindows())
         {
             Assert.Inconclusive("Windows reports the drive root's free space for any path.");
         }
 
-        FileHelper.EnsureFreeSpace(Path.Combine(TempDir, "missing", "dir"), long.MaxValue);
+        Assert.IsNull(FileHelper.GetAvailableFreeSpace(Path.Combine(TempDir, "missing", "dir")));
     }
 
     [TestMethod]

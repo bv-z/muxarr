@@ -167,7 +167,9 @@ public sealed class ConverterIntegrationFixture : IDisposable
     {
         return await WithDbContext(async ctx =>
         {
-            var conv = await ctx.MediaConversions.FirstOrDefaultAsync(c => c.Id == id);
+            var conv = await ctx.MediaConversions
+                .Include(c => c.LogEntries.OrderBy(e => e.Id))
+                .FirstOrDefaultAsync(c => c.Id == id);
             Assert.IsNotNull(conv, $"Conversion #{id} not found");
             return conv;
         });
@@ -178,7 +180,7 @@ public sealed class ConverterIntegrationFixture : IDisposable
     {
         var conv = await ReloadConversion(id);
         Assert.AreEqual(expected, conv.State,
-            $"expected {expected}, got {conv.State}. Log:\n{conv.Log}");
+            $"expected {expected}, got {conv.State}. Log:\n{conv.LogText()}");
         return conv;
     }
 

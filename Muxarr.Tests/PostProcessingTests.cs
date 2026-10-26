@@ -13,6 +13,8 @@ public class PostProcessingTests
     [DataRow("echo {{filename}} in \"{{directory}}\"", "echo \"${MUXARR_FILENAME}\" in \"${MUXARR_DIRECTORY}\"")]
     [DataRow("echo \"say \\\"{file}\\\"\"", "echo \"say \\\"${MUXARR_FILE}\\\"\"")]
     [DataRow("echo $HOME", "echo $HOME")]
+    [DataRow("# don't touch\nchmod 664 \"{file}\"", "# don't touch\nchmod 664 \"${MUXARR_FILE}\"")]
+    [DataRow("echo \"$(basename \"{file}\")\"", "echo \"$(basename \"${MUXARR_FILE}\")\"")]
     public void BuildShellScript_ReplacesPlaceholdersWithQuotedVariables(string command, string expected)
     {
         var config = new ProcessingConfig { PostProcessingCommand = command };

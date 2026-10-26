@@ -45,6 +45,7 @@ public class ProcessingConfig
         var command = PostProcessingCommand;
         var script = new StringBuilder(command.Length + 32);
         var quote = '\0';
+        var outerQuotes = new Stack<char>();
 
         for (var i = 0; i < command.Length; i++)
         {
@@ -54,6 +55,35 @@ public class ProcessingConfig
             {
                 script.Append(c).Append(command[++i]);
                 continue;
+            }
+
+            // A comment runs to the end of the line, so the apostrophe in "don't" is not a quote.
+            if (quote == '\0' && c == '#' && (i == 0 || char.IsWhiteSpace(command[i - 1]) || command[i - 1] is ';' or '&' or '|'))
+            {
+                var end = command.IndexOf('\n', i);
+                end = end < 0 ? command.Length : end;
+                script.Append(command, i, end - i);
+                i = end - 1;
+                continue;
+            }
+
+            // Quoting starts over inside $( ), even within double quotes: "$(basename "{file}")".
+            if (quote != '\'' && c == '$' && i + 1 < command.Length && command[i + 1] == '(')
+            {
+                outerQuotes.Push(quote);
+                quote = '\0';
+                script.Append("$(");
+                i++;
+                continue;
+            }
+
+            if (quote == '\0' && c == '(')
+            {
+                outerQuotes.Push('\0');
+            }
+            else if (quote == '\0' && c == ')' && outerQuotes.Count > 0)
+            {
+                quote = outerQuotes.Pop();
             }
 
             var match = ShellVariables.FirstOrDefault(v =>
@@ -83,15 +113,8 @@ public class ProcessingConfig
 
     public string ResolveCommand(string filePath)
     {
-        var directory = Path.GetDirectoryName(filePath) ?? string.Empty;
-        var filename = Path.GetFileNameWithoutExtension(filePath);
-
-        return PostProcessingCommand
-            .Replace("{{file}}", filePath)
-            .Replace("{file}", filePath)
-            .Replace("{{filename}}", filename)
-            .Replace("{filename}", filename)
-            .Replace("{{directory}}", directory)
-            .Replace("{directory}", directory);
+        var environment = ShellEnvironment(filePath);
+        return ShellVariables.Aggregate(PostProcessingCommand,
+            (command, v) => command.Replace(v.Placeholder, environment[v.Variable]));
     }
 }

@@ -8,25 +8,16 @@ public static class FileHelper
     private const int DefaultBufferSize = 1024 * 1024; // 1MB buffer
     private const int ProgressSize = 1024 * 1024 * 100; // Progress event every 100MB
 
-    // Throws when the disk holding directory has less than neededBytes free. A disk that
-    // can't report its free space never blocks the caller.
-    public static void EnsureFreeSpace(string directory, long neededBytes)
+    // Null when the disk can't report its free space.
+    public static long? GetAvailableFreeSpace(string directory)
     {
-        long available;
         try
         {
-            available = new DriveInfo(directory).AvailableFreeSpace;
+            return new DriveInfo(directory).AvailableFreeSpace;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception)
         {
-            return;
-        }
-
-        if (available < neededBytes)
-        {
-            throw new IOException(
-                $"Not enough free space in {directory} for the converted copy: it needs about " +
-                $"{neededBytes.DisplayFileSize()} and {available.DisplayFileSize()} is free.");
+            return null;
         }
     }
 
