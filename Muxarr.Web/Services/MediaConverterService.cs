@@ -516,6 +516,20 @@ public class MediaConverterService(
             return;
         }
 
+        // The copy is written next to the original, so that disk needs room for about one more of it.
+        var directory = Path.GetDirectoryName(conversion.MediaFile.Path)!;
+        if (FileHelper.GetAvailableFreeSpace(directory) is { } free && free < conversion.MediaFile.Size)
+        {
+            conversion.Log($"Not enough free space in {directory} for the converted copy: it needs about " +
+                           $"{conversion.MediaFile.Size.DisplayFileSize()} and {free.DisplayFileSize()} is free.",
+                logger, true);
+            conversion.State = ConversionState.Failed;
+            context.Update(conversion);
+            await context.SaveChangesAsync(token);
+            ConverterStateChanged?.Invoke(new ConverterProgressEvent(conversion));
+            return;
+        }
+
         // Only a remux uses this, and a dropped track retires the container duration.
         Dictionary<int, long>? measuredEnds = null;
         var dropsTracks = conversion.ConversionPlan.Tracks.Count < conversion.BeforeSnapshot!.Tracks.Count;
@@ -539,10 +553,6 @@ public class MediaConverterService(
         var tmp = conversion.MediaFile.Path + ".muxtmp";
         try
         {
-            // The copy is written next to the original, so that disk needs room for about
-            // one more of it. Checking first beats filling the disk and failing near the end.
-            FileHelper.EnsureFreeSpace(Path.GetDirectoryName(tmp)!, new FileInfo(conversion.MediaFile.Path).Length);
-
             conversion.TempFilePath = tmp;
             conversion.State = ConversionState.Processing;
             conversion.StartedDate ??= DateTime.UtcNow;

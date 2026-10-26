@@ -45,6 +45,6 @@ public class ConversionFailureTests : IntegrationTestBase
 
         Assert.IsTrue(thrown, "the failure was never injected");
         var result = await Fixture.AssertStateAsync(conversion.Id, ConversionState.Failed);
-        StringAssert.Contains(result.Log, "boom");
+        StringAssert.Contains(result.LogText(), "boom");
     }
 }

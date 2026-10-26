@@ -18,7 +18,7 @@ namespace Muxarr.Data.Migrations
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
 
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
                 {
@@ -55,6 +55,32 @@ namespace Muxarr.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Config", (string)null);
+                });
+
+            modelBuilder.Entity("Muxarr.Data.Entities.ConversionLogEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsError")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MediaConversionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaConversionId");
+
+                    b.ToTable("ConversionLogEntry", (string)null);
                 });
 
             modelBuilder.Entity("Muxarr.Data.Entities.Integration", b =>
@@ -153,11 +179,6 @@ namespace Muxarr.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
-
-                    b.Property<string>("Log")
-                        .IsRequired()
-                        .HasMaxLength(2147483647)
-                        .HasColumnType("TEXT");
 
                     b.Property<int?>("MediaFileId")
                         .HasColumnType("INTEGER");
@@ -527,6 +548,15 @@ namespace Muxarr.Data.Migrations
                     b.ToTable("TrackSnapshot", (string)null);
                 });
 
+            modelBuilder.Entity("Muxarr.Data.Entities.ConversionLogEntry", b =>
+                {
+                    b.HasOne("Muxarr.Data.Entities.MediaConversion", null)
+                        .WithMany("LogEntries")
+                        .HasForeignKey("MediaConversionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Muxarr.Data.Entities.MediaConversion", b =>
                 {
                     b.HasOne("Muxarr.Data.Entities.MediaSnapshot", "AfterSnapshot")
@@ -593,6 +623,11 @@ namespace Muxarr.Data.Migrations
             modelBuilder.Entity("Muxarr.Data.Entities.Integration", b =>
                 {
                     b.Navigation("MediaInfos");
+                });
+
+            modelBuilder.Entity("Muxarr.Data.Entities.MediaConversion", b =>
+                {
+                    b.Navigation("LogEntries");
                 });
 
             modelBuilder.Entity("Muxarr.Data.Entities.MediaFile", b =>

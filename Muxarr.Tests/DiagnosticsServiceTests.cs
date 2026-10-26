@@ -59,7 +59,7 @@ public class DiagnosticsServiceTests
         context.MediaConversions.Add(new MediaConversion
         {
             Name = "Unknown Film", MediaFile = file, State = ConversionState.Failed,
-            Log = "[2026-10-24 18:41:28.400] Something bad happened while processing the file."
+            LogEntries = [new ConversionLogEntry { Timestamp = DateTime.UtcNow, Message = "Something bad happened while processing the file.", IsError = true }]
         });
         context.LogEntries.Add(new LogEntry
         {

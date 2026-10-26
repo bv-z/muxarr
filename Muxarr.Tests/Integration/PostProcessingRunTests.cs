@@ -40,7 +40,7 @@ public class PostProcessingRunTests : IntegrationTestBase
         await Fixture.Converter.RunAsync(CancellationToken.None);
 
         var result = await Fixture.AssertStateAsync(conversion.Id, ConversionState.Completed);
-        StringAssert.Contains(result.Log, "mkvpropedit", "this should be the in-place edit, not a remux");
+        StringAssert.Contains(result.LogText(), "mkvpropedit", "this should be the in-place edit, not a remux");
         Assert.IsTrue(File.Exists(marker), "post-processing should have run");
     }
 }
