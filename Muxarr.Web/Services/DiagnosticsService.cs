@@ -261,6 +261,13 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
                 var removed = file.Snapshot.Tracks.Where(t => !keep.Contains(t.Index)).ToList();
                 entry.AppendLine($"  Would remove now:     {(removed.Count > 0 ? Tracks(removed) : "nothing")}" +
                                  (file.HasNonStandardMetadata || file.HasRemovableChapters ? "; also needs a metadata fix" : ""));
+                if (file.HasNonStandardMetadata)
+                {
+                    var changes = file.DescribeMetadataChanges(file.Profile);
+                    entry.AppendLine($"  Metadata to fix now:  {(changes.Count > 0
+                        ? string.Join(", ", changes)
+                        : "nothing by the current rules; the flag is left from an earlier scan")}");
+                }
             }
 
             (changed ? replaced : unchanged).Add(entry.ToString());
