@@ -153,6 +153,54 @@ public class DiagnosticsServiceTests
     }
 
     [TestMethod]
+    public async Task Report_ListsConversionsThatRemovedAnUnlabeledAudioTrack()
+    {
+        static TrackSnapshot A(int index, string language, string codec) => new()
+        {
+            Index = index, Type = Muxarr.Core.Models.MediaTrackType.Audio, LanguageName = language,
+            LanguageCode = IsoLanguage.Find(language).ThreeLetterCode ?? "und", Codec = codec, AudioChannels = 6
+        };
+
+        await using (var context = new AppDbContext(_options))
+        {
+            var profile = await context.Profiles.SingleAsync();
+            void Converted(string title, TrackSnapshot[] before, TrackSnapshot[] after)
+            {
+                var file = new MediaFile
+                {
+                    Path = $"/data/media/bluray/{title}/{title}.mkv", Title = title, Profile = profile,
+                    Snapshot = new MediaSnapshot { Tracks = after.Select(t => A(t.Index, t.LanguageName, t.Codec)).ToList() }
+                };
+                context.MediaFiles.Add(file);
+                context.MediaConversions.Add(new MediaConversion
+                {
+                    Name = title, MediaFile = file, State = ConversionState.Completed,
+                    BeforeSnapshot = new MediaSnapshot { Tracks = before.ToList() },
+                    AfterSnapshot = new MediaSnapshot { Tracks = after.ToList() }
+                });
+            }
+
+            // Its own AC-3 and DTS, both unlabeled: the DTS went.
+            Converted("Surrogates", [A(1, "Undetermined", "Ac3"), A(2, "Undetermined", "Dts")], [A(1, "Undetermined", "Ac3")]);
+            // Retagged on the way through, nothing lost.
+            Converted("Retagged", [A(1, "Undetermined", "Ac3"), A(2, "German", "Ac3")], [A(1, "English", "Ac3")]);
+            // Only a tagged foreign track went.
+            Converted("Dub Removed", [A(1, "Undetermined", "Eac3"), A(2, "French", "Ac3")], [A(1, "Undetermined", "Eac3")]);
+            await context.SaveChangesAsync();
+        }
+
+        var report = await new DiagnosticsService(new Factory(_options)).BuildReportAsync();
+        var section = report[report.IndexOf("== Past conversions that removed an unlabeled audio track ==", StringComparison.Ordinal)..];
+        section = section[..section.IndexOf("\n== ", 5, StringComparison.Ordinal)];
+
+        StringAssert.Contains(section, "Surrogates");
+        StringAssert.Contains(section, "Removed: audio #2 Undetermined DTS 5.1");
+        Assert.IsFalse(section.Contains("Retagged"), section);
+        Assert.IsFalse(section.Contains("Dub Removed"), section);
+        StringAssert.Contains(section, "1 of 3 completed conversions.");
+    }
+
+    [TestMethod]
     public void FileName_IsDatedText()
     {
         StringAssert.Matches(DiagnosticsService.FileName(DateTime.UtcNow),

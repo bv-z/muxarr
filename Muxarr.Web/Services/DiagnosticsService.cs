@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Muxarr.Core.Config;
+using Muxarr.Core.Language;
 using Muxarr.Core.Models;
 using Muxarr.Core.Utilities;
 using Muxarr.Data;
@@ -44,6 +45,7 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         await WriteSettings(sb, context, profiles, token);
         await WriteLibrary(sb, context, token);
         await WriteNeedingWorkAgain(sb, context, token);
+        await WriteLostUnlabeledAudio(sb, context, token);
         await WriteConversions(sb, context, token);
         await WriteLog(sb, context, token);
 
@@ -271,6 +273,96 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         {
             sb.Append(entry);
         }
+    }
+
+    /// <summary>
+    /// Every completed conversion that dropped an audio track with no language. Before the
+    /// fix for several unlabeled tracks (Surrogates: its own AC-3 and DTS, both "und"), all
+    /// but one of them could be removed; this is the list of files worth getting again.
+    /// Tracks are matched on codec and channels, as the conversion may have retagged them.
+    /// </summary>
+    private static async Task WriteLostUnlabeledAudio(StringBuilder sb, AppDbContext context, CancellationToken token)
+    {
+        Section(sb, "Past conversions that removed an unlabeled audio track");
+        var conversions = await context.MediaConversions.AsNoTracking()
+            .Include(c => c.BeforeSnapshot).ThenInclude(s => s!.Tracks)
+            .Include(c => c.AfterSnapshot).ThenInclude(s => s!.Tracks)
+            .Include(c => c.MediaFile).ThenInclude(f => f!.Snapshot).ThenInclude(s => s.Tracks)
+            .Where(c => c.State == ConversionState.Completed && c.BeforeSnapshotId != null && c.AfterSnapshotId != null)
+            .OrderBy(c => c.Id)
+            .ToListAsync(token);
+
+        var hits = 0;
+        foreach (var c in conversions)
+        {
+            var lost = LostUnlabeledAudio(c.BeforeSnapshot!.Tracks, c.AfterSnapshot!.Tracks);
+            if (lost.Count == 0)
+            {
+                continue;
+            }
+
+            hits++;
+            sb.AppendLine($"--- #{c.Id} {c.Name} - converted {Time(c.UpdatedDate)} - {c.MediaFile?.Path ?? "(file no longer in the library)"}");
+            sb.AppendLine($"  Removed: {string.Join(", ", lost.Select(t => t.Describe()))}");
+            sb.AppendLine($"  Before:  {AudioTracks(c.BeforeSnapshot.Tracks)}");
+            sb.AppendLine($"  After:   {AudioTracks(c.AfterSnapshot.Tracks)}");
+            if (c.MediaFile?.Snapshot is { } now)
+            {
+                sb.AppendLine($"  Now:     {AudioTracks(now.Tracks)}");
+            }
+        }
+
+        sb.AppendLine(hits == 0
+            ? $"None among {conversions.Count} completed conversions."
+            : $"{hits} of {conversions.Count} completed conversions. Where \"Now\" still matches \"After\", the file has not been replaced since.");
+    }
+
+    // The unlabeled audio tracks of the source with no counterpart in the output. Tagged
+    // tracks claim their exact match first, so a kept unlabeled track is not mistaken for one.
+    private static List<TrackSnapshot> LostUnlabeledAudio(IEnumerable<TrackSnapshot> before, IEnumerable<TrackSnapshot> after)
+    {
+        static bool Unlabeled(TrackSnapshot t) =>
+            t.LanguageName is IsoLanguage.UnknownName or IsoLanguage.UndeterminedName;
+
+        var beforeAudio = before.Where(t => t.Type == MediaTrackType.Audio).OrderBy(t => t.Index).ToList();
+        var unlabeled = beforeAudio.Where(Unlabeled).ToList();
+        if (unlabeled.Count == 0)
+        {
+            return [];
+        }
+
+        var remaining = after.Where(t => t.Type == MediaTrackType.Audio).OrderBy(t => t.Index).ToList();
+        foreach (var tagged in beforeAudio.Where(t => !Unlabeled(t)))
+        {
+            var match = remaining.FirstOrDefault(t => t.LanguageName == tagged.LanguageName
+                                                      && t.Codec == tagged.Codec && t.AudioChannels == tagged.AudioChannels);
+            if (match != null)
+            {
+                remaining.Remove(match);
+            }
+        }
+
+        var lost = new List<TrackSnapshot>();
+        foreach (var track in unlabeled)
+        {
+            var match = remaining.FirstOrDefault(t => t.Codec == track.Codec && t.AudioChannels == track.AudioChannels);
+            if (match != null)
+            {
+                remaining.Remove(match);
+            }
+            else
+            {
+                lost.Add(track);
+            }
+        }
+
+        return lost;
+    }
+
+    private static string AudioTracks(IEnumerable<TrackSnapshot> tracks)
+    {
+        var audio = tracks.Where(t => t.Type == MediaTrackType.Audio).OrderBy(t => t.Index).Select(t => t.Describe()).ToList();
+        return audio.Count > 0 ? string.Join(", ", audio) : "(no audio)";
     }
 
     private static string Tracks(IEnumerable<TrackSnapshot> tracks)
