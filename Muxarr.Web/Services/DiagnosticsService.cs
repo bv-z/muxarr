@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Muxarr.Core.Config;
+using Muxarr.Core.Extensions;
 using Muxarr.Core.Language;
 using Muxarr.Core.Models;
 using Muxarr.Core.Utilities;
@@ -45,7 +46,10 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         await WriteSettings(sb, context, profiles, token);
         await WriteLibrary(sb, context, token);
         await WriteNeedingWorkAgain(sb, context, token);
-        await WriteLostUnlabeledAudio(sb, context, token);
+        var history = await LoadHistory(context, token);
+        WriteLostUnlabeledAudio(sb, history);
+        WriteRemovedMainAudio(sb, history, profiles);
+        WriteLostUnlabeledSubtitles(sb, history, profiles);
         await WriteConversions(sb, context, token);
         await WriteLog(sb, context, token);
 
@@ -282,27 +286,34 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         }
     }
 
+    // Every completed conversion with both snapshots, for the sections that look back at
+    // what conversions removed.
+    private static async Task<List<MediaConversion>> LoadHistory(AppDbContext context, CancellationToken token)
+    {
+        return await context.MediaConversions.AsNoTracking()
+            .Include(c => c.BeforeSnapshot).ThenInclude(s => s!.Tracks)
+            .Include(c => c.AfterSnapshot).ThenInclude(s => s!.Tracks)
+            .Include(c => c.MediaFile).ThenInclude(f => f!.Snapshot).ThenInclude(s => s.Tracks)
+            .Where(c => c.State == ConversionState.Completed && c.BeforeSnapshotId != null && c.AfterSnapshotId != null)
+            .OrderBy(c => c.Id)
+            .AsSplitQuery()
+            .ToListAsync(token);
+    }
+
     /// <summary>
     /// Every completed conversion that dropped an audio track with no language. Before the
     /// fix for several unlabeled tracks (Surrogates: its own AC-3 and DTS, both "und"), all
     /// but one of them could be removed; this is the list of files worth getting again.
     /// Tracks are matched on codec and channels, as the conversion may have retagged them.
     /// </summary>
-    private static async Task WriteLostUnlabeledAudio(StringBuilder sb, AppDbContext context, CancellationToken token)
+    private static void WriteLostUnlabeledAudio(StringBuilder sb, List<MediaConversion> conversions)
     {
         Section(sb, "Past conversions that removed an unlabeled audio track");
-        var conversions = await context.MediaConversions.AsNoTracking()
-            .Include(c => c.BeforeSnapshot).ThenInclude(s => s!.Tracks)
-            .Include(c => c.AfterSnapshot).ThenInclude(s => s!.Tracks)
-            .Include(c => c.MediaFile).ThenInclude(f => f!.Snapshot).ThenInclude(s => s.Tracks)
-            .Where(c => c.State == ConversionState.Completed && c.BeforeSnapshotId != null && c.AfterSnapshotId != null)
-            .OrderBy(c => c.Id)
-            .ToListAsync(token);
-
         var hits = 0;
         foreach (var c in conversions)
         {
-            var lost = LostUnlabeledAudio(c.BeforeSnapshot!.Tracks, c.AfterSnapshot!.Tracks);
+            var lost = Removed(c.BeforeSnapshot!.Tracks, c.AfterSnapshot!.Tracks, MediaTrackType.Audio)
+                .Where(Unlabeled).ToList();
             if (lost.Count == 0)
             {
                 continue;
@@ -324,46 +335,191 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
             : $"{hits} of {conversions.Count} completed conversions. Where \"Now\" still matches \"After\", the file has not been replaced since.");
     }
 
-    // The unlabeled audio tracks of the source with no counterpart in the output. Tagged
-    // tracks claim their exact match first, so a kept unlabeled track is not mistaken for one.
-    private static List<TrackSnapshot> LostUnlabeledAudio(IEnumerable<TrackSnapshot> before, IEnumerable<TrackSnapshot> after)
+    /// <summary>
+    /// Subtitles with no language that a conversion removed. A profile that keeps only some
+    /// languages drops them on purpose, but an unlabeled subtitle is often the English one.
+    /// Grouped by movie or series folder.
+    /// </summary>
+    private static void WriteLostUnlabeledSubtitles(StringBuilder sb, List<MediaConversion> conversions,
+        List<Profile> profiles)
     {
-        static bool Unlabeled(TrackSnapshot t) =>
-            t.LanguageName is IsoLanguage.UnknownName or IsoLanguage.UndeterminedName;
-
-        var beforeAudio = before.Where(t => t.Type == MediaTrackType.Audio).OrderBy(t => t.Index).ToList();
-        var unlabeled = beforeAudio.Where(Unlabeled).ToList();
-        if (unlabeled.Count == 0)
+        Section(sb, "Past conversions that removed an unlabeled subtitle");
+        var groups = new SortedDictionary<string, Group>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in conversions)
         {
-            return [];
+            var lost = Removed(c.BeforeSnapshot!.Tracks, c.AfterSnapshot!.Tracks, MediaTrackType.Subtitles)
+                .Where(Unlabeled).ToList();
+            if (lost.Count == 0)
+            {
+                continue;
+            }
+
+            var key = GroupName(c, profiles);
+            if (!groups.TryGetValue(key, out var g))
+            {
+                groups[key] = g = new Group();
+            }
+
+            g.Files++;
+            g.Removed.AddRange(lost.Select(SubtitleKind));
+            g.Kept.UnionWith(c.AfterSnapshot.Tracks.Where(t => t.Type == MediaTrackType.Subtitles).Select(t => t.LanguageName));
         }
 
-        var remaining = after.Where(t => t.Type == MediaTrackType.Audio).OrderBy(t => t.Index).ToList();
-        foreach (var tagged in beforeAudio.Where(t => !Unlabeled(t)))
+        if (groups.Count == 0)
         {
-            var match = remaining.FirstOrDefault(t => t.LanguageName == tagged.LanguageName
-                                                      && t.Codec == tagged.Codec && t.AudioChannels == tagged.AudioChannels);
-            if (match != null)
+            sb.AppendLine($"None among {conversions.Count} completed conversions.");
+            return;
+        }
+
+        sb.AppendLine($"{groups.Values.Sum(g => g.Files)} of {conversions.Count} completed conversions, in {groups.Count} folders. " +
+                      "Your subtitle languages decide these; listed because an unlabeled subtitle is often English.");
+        foreach (var (name, g) in groups)
+        {
+            sb.AppendLine($"  {name}: {Files(g.Files)}; removed {Counted(g.Removed)}; " +
+                          $"kept {(g.Kept.Count > 0 ? string.Join(", ", g.Kept.Order()) : "no subtitles")}");
+        }
+    }
+
+    /// <summary>
+    /// Conversions that removed the audio the file itself marks as its main one: the default
+    /// track or one flagged original. Normal when a dub was the default (MULTi releases), but
+    /// it is also what a wrong original language in Sonarr/Radarr looks like, so the original
+    /// language each file has now is shown beside it. Commentary is left out.
+    /// </summary>
+    private static void WriteRemovedMainAudio(StringBuilder sb, List<MediaConversion> conversions,
+        List<Profile> profiles)
+    {
+        Section(sb, "Past conversions that removed the file's default or original-flagged audio");
+        var flagged = new SortedDictionary<string, Group>(StringComparer.OrdinalIgnoreCase);
+        var defaults = new SortedDictionary<string, Group>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in conversions)
+        {
+            var removed = Removed(c.BeforeSnapshot!.Tracks, c.AfterSnapshot!.Tracks, MediaTrackType.Audio)
+                .Where(t => !Unlabeled(t) && !t.IsCommentary && (t.IsOriginal || t.IsDefault))
+                .ToList();
+            if (removed.Count == 0)
             {
-                remaining.Remove(match);
+                continue;
+            }
+
+            var target = removed.Any(t => t.IsOriginal) ? flagged : defaults;
+            var key = GroupName(c, profiles);
+            if (!target.TryGetValue(key, out var g))
+            {
+                target[key] = g = new Group
+                {
+                    Original = string.IsNullOrEmpty(c.MediaFile?.OriginalLanguage) ? "unknown" : c.MediaFile!.OriginalLanguage!
+                };
+            }
+
+            g.Files++;
+            g.Removed.AddRange(removed.Select(t => $"{t.LanguageName}{(t.IsOriginal ? " (marked original)" : " (default)")}"));
+            g.Kept.UnionWith(c.AfterSnapshot.Tracks.Where(t => t.Type == MediaTrackType.Audio).Select(t => t.LanguageName));
+        }
+
+        if (flagged.Count == 0 && defaults.Count == 0)
+        {
+            sb.AppendLine($"None among {conversions.Count} completed conversions.");
+            return;
+        }
+
+        sb.AppendLine("Fine when the removed track was a dub. If it was the film's own language, Sonarr/Radarr has the " +
+                      "wrong original language for it: fix it there and get the file again.");
+        foreach (var (title, list) in new[] { ("The file marked the removed track as its original:", flagged), ("The removed track was the default:", defaults) })
+        {
+            if (list.Count == 0)
+            {
+                continue;
+            }
+
+            sb.AppendLine();
+            sb.AppendLine($"{title} {Files(list.Values.Sum(g => g.Files))} in {list.Count} folders");
+            foreach (var (name, g) in list)
+            {
+                sb.AppendLine($"  {name}: {Files(g.Files)}; Sonarr/Radarr original {g.Original}; removed {Counted(g.Removed)}; " +
+                              $"kept {(g.Kept.Count > 0 ? string.Join(", ", g.Kept.Order()) : "no audio")}");
             }
         }
+    }
 
-        var lost = new List<TrackSnapshot>();
-        foreach (var track in unlabeled)
+    private static bool Unlabeled(TrackSnapshot t) =>
+        t.LanguageName is IsoLanguage.UnknownName or IsoLanguage.UndeterminedName;
+
+    // The source tracks of one type with no counterpart in the output. Tagged tracks claim
+    // an exact match first (language, codec and channels or subtitle flags), then unlabeled
+    // ones take any match on codec and the rest, as the conversion may have retagged them.
+    private static List<TrackSnapshot> Removed(IEnumerable<TrackSnapshot> before, IEnumerable<TrackSnapshot> after,
+        MediaTrackType type)
+    {
+        static bool SameShape(TrackSnapshot a, TrackSnapshot b) =>
+            a.Codec == b.Codec && (a.Type == MediaTrackType.Audio
+                ? a.AudioChannels == b.AudioChannels
+                : a.IsForced == b.IsForced && a.IsHearingImpaired == b.IsHearingImpaired);
+
+        var source = before.Where(t => t.Type == type).OrderBy(t => t.Index).ToList();
+        var remaining = after.Where(t => t.Type == type).OrderBy(t => t.Index).ToList();
+        var removed = new List<TrackSnapshot>();
+        foreach (var track in source.Where(t => !Unlabeled(t)).Concat(source.Where(Unlabeled)))
         {
-            var match = remaining.FirstOrDefault(t => t.Codec == track.Codec && t.AudioChannels == track.AudioChannels);
+            var match = remaining.FirstOrDefault(t => SameShape(t, track)
+                                                      && (Unlabeled(track) || t.LanguageName == track.LanguageName));
             if (match != null)
             {
                 remaining.Remove(match);
             }
             else
             {
-                lost.Add(track);
+                removed.Add(track);
             }
         }
 
-        return lost;
+        return removed.OrderBy(t => t.Index).ToList();
+    }
+
+    // The movie or series folder a conversion's file lives in, under its profile's folder.
+    private static string GroupName(MediaConversion c, List<Profile> profiles)
+    {
+        var path = c.MediaFile?.Path;
+        if (path == null)
+        {
+            return $"{c.Name} (no longer in the library)";
+        }
+
+        foreach (var root in profiles.SelectMany(p => p.Directories).OrderByDescending(d => d.Length))
+        {
+            if (path.IsInDirectory(root))
+            {
+                var rest = path[root.TrimEnd('/').Length..].TrimStart('/');
+                var slash = rest.IndexOf('/');
+                return slash > 0 ? rest[..slash] : Path.GetFileNameWithoutExtension(rest);
+            }
+        }
+
+        return Path.GetFileName(Path.GetDirectoryName(path)) ?? c.Name;
+    }
+
+    private static string SubtitleKind(TrackSnapshot t)
+    {
+        var flags = t.IsForced ? " forced" : t.IsHearingImpaired ? " SDH" : "";
+        return $"{t.Codec.FormatCodec()}{flags}";
+    }
+
+    // "French (default) x3, German (default)": each distinct entry with how often it came up.
+    private static string Counted(IEnumerable<string> items)
+    {
+        return string.Join(", ", items.GroupBy(x => x).OrderByDescending(g => g.Count()).ThenBy(g => g.Key)
+            .Select(g => g.Count() > 1 ? $"{g.Key} x{g.Count()}" : g.Key));
+    }
+
+    private static string Files(int count) => count == 1 ? "1 file" : $"{count} files";
+
+    // Files from one movie or series folder, in the history sections.
+    private sealed class Group
+    {
+        public int Files;
+        public string Original = "";
+        public readonly List<string> Removed = [];
+        public readonly HashSet<string> Kept = [];
     }
 
     private static string AudioTracks(IEnumerable<TrackSnapshot> tracks)

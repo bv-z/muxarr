@@ -201,6 +201,77 @@ public class DiagnosticsServiceTests
     }
 
     [TestMethod]
+    public async Task Report_ListsRemovedMainAudioAndUnlabeledSubtitles_ByFolder()
+    {
+        static TrackSnapshot A(int index, string language, string codec, bool isDefault = false, bool original = false) => new()
+        {
+            Index = index, Type = Muxarr.Core.Models.MediaTrackType.Audio, LanguageName = language,
+            LanguageCode = IsoLanguage.Find(language).ThreeLetterCode ?? "und", Codec = codec, AudioChannels = 6,
+            IsDefault = isDefault, IsOriginal = original
+        };
+        static TrackSnapshot S(int index, string language) => new()
+        {
+            Index = index, Type = Muxarr.Core.Models.MediaTrackType.Subtitles, LanguageName = language,
+            LanguageCode = IsoLanguage.Find(language).ThreeLetterCode ?? "und", Codec = "Srt"
+        };
+
+        await using (var context = new AppDbContext(_options))
+        {
+            var profile = await context.Profiles.SingleAsync();
+            void Converted(string relative, string? original, TrackSnapshot[] before, TrackSnapshot[] after)
+            {
+                var file = new MediaFile
+                {
+                    Path = $"/data/media/bluray/{relative}", Profile = profile, OriginalLanguage = original,
+                    Snapshot = new MediaSnapshot { Tracks = [] }
+                };
+                context.MediaFiles.Add(file);
+                context.MediaConversions.Add(new MediaConversion
+                {
+                    Name = Path.GetFileNameWithoutExtension(relative), MediaFile = file, State = ConversionState.Completed,
+                    BeforeSnapshot = new MediaSnapshot { Tracks = before.ToList() },
+                    AfterSnapshot = new MediaSnapshot { Tracks = after.ToList() }
+                });
+            }
+
+            // Radarr says English, so the film's own French went.
+            Converted("Amelie (2001)/Amelie (2001).mkv", "English",
+                [A(1, "French", "Dts", isDefault: true), A(2, "English", "Ac3")], [A(1, "English", "Ac3")]);
+            Converted("Flagged (2010)/Flagged (2010).mkv", "English",
+                [A(1, "English", "Ac3", isDefault: true), A(2, "German", "Ac3", original: true)], [A(1, "English", "Ac3", isDefault: true)]);
+            // A plain foreign dub: nothing to report.
+            Converted("Normal (2015)/Normal (2015).mkv", "English",
+                [A(1, "English", "Ac3", isDefault: true), A(2, "French", "Ac3")], [A(1, "English", "Ac3", isDefault: true)]);
+            Converted("Show/Season 1/Show S01E01.mkv", "English",
+                [A(1, "English", "Ac3", isDefault: true), S(2, "Undetermined"), S(3, "English")], [A(1, "English", "Ac3", isDefault: true), S(2, "English")]);
+            Converted("Show/Season 1/Show S01E02.mkv", "English",
+                [A(1, "English", "Ac3", isDefault: true), S(2, "Undetermined"), S(3, "English")], [A(1, "English", "Ac3", isDefault: true), S(2, "English")]);
+            // Its only subtitle was retagged, not removed.
+            Converted("Retagged (2020)/Retagged (2020).mkv", "English",
+                [A(1, "English", "Ac3", isDefault: true), S(2, "Undetermined")], [A(1, "English", "Ac3", isDefault: true), S(2, "English")]);
+            await context.SaveChangesAsync();
+        }
+
+        var report = await new DiagnosticsService(new Factory(_options)).BuildReportAsync();
+        string SectionOf(string title)
+        {
+            var s = report[report.IndexOf($"== {title} ==", StringComparison.Ordinal)..];
+            return s[..s.IndexOf("\n== ", 5, StringComparison.Ordinal)];
+        }
+
+        var main = SectionOf("Past conversions that removed the file's default or original-flagged audio");
+        StringAssert.Contains(main, "Amelie (2001): 1 file; Sonarr/Radarr original English; removed French (default); kept English");
+        StringAssert.Contains(main, "Flagged (2010): 1 file; Sonarr/Radarr original English; removed German (marked original); kept English");
+        Assert.IsTrue(main.IndexOf("marked the removed track as its original", StringComparison.Ordinal)
+                      < main.IndexOf("Flagged (2010)", StringComparison.Ordinal), main);
+        Assert.IsFalse(main.Contains("Normal (2015)"), main);
+
+        var subs = SectionOf("Past conversions that removed an unlabeled subtitle");
+        StringAssert.Contains(subs, "Show: 2 files; removed SRT x2; kept English");
+        Assert.IsFalse(subs.Contains("Retagged"), subs);
+    }
+
+    [TestMethod]
     public void FileName_IsDatedText()
     {
         StringAssert.Matches(DiagnosticsService.FileName(DateTime.UtcNow),
