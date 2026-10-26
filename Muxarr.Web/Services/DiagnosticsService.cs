@@ -48,6 +48,7 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         await WriteNeedingWorkAgain(sb, context, token);
         var history = await LoadHistory(context, token);
         WriteLostUnlabeledAudio(sb, history);
+        WriteOnlyExtrasLeft(sb, history);
         WriteRemovedMainAudio(sb, history, profiles);
         WriteLostUnlabeledSubtitles(sb, history, profiles);
         await WriteConversions(sb, context, token);
@@ -414,7 +415,7 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
 
             g.Files++;
             g.Removed.AddRange(removed.Select(t => $"{t.LanguageName}{(t.IsOriginal ? " (marked original)" : " (default)")}"));
-            g.Kept.UnionWith(c.AfterSnapshot.Tracks.Where(t => t.Type == MediaTrackType.Audio).Select(t => t.LanguageName));
+            g.Kept.UnionWith(c.AfterSnapshot.Tracks.Where(t => t.Type == MediaTrackType.Audio).Select(KeptName));
         }
 
         if (flagged.Count == 0 && defaults.Count == 0)
@@ -441,6 +442,43 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
             }
         }
     }
+
+    /// <summary>
+    /// Conversions whose output has only commentary or audio description left for audio
+    /// while the source had the film itself (Lords of Dogtown: an unlabeled main track
+    /// beside two tagged English commentaries). Each one needs getting again.
+    /// </summary>
+    private static void WriteOnlyExtrasLeft(StringBuilder sb, List<MediaConversion> conversions)
+    {
+        Section(sb, "Past conversions that left only commentary or audio description");
+        static bool Extra(TrackSnapshot t) => t.IsCommentary || t.IsVisualImpaired;
+        var hits = 0;
+        foreach (var c in conversions)
+        {
+            var before = c.BeforeSnapshot!.Tracks.Where(t => t.Type == MediaTrackType.Audio).ToList();
+            var after = c.AfterSnapshot!.Tracks.Where(t => t.Type == MediaTrackType.Audio).ToList();
+            if (after.Count == 0 || !after.All(Extra) || before.All(Extra))
+            {
+                continue;
+            }
+
+            hits++;
+            sb.AppendLine($"--- #{c.Id} {c.Name} - converted {Time(c.UpdatedDate)} - {c.MediaFile?.Path ?? "(file no longer in the library)"}");
+            sb.AppendLine($"  Before:  {AudioTracks(before)}");
+            sb.AppendLine($"  After:   {AudioTracks(after)}");
+            if (c.MediaFile?.Snapshot is { } now)
+            {
+                sb.AppendLine($"  Now:     {AudioTracks(now.Tracks)}");
+            }
+        }
+
+        sb.AppendLine(hits == 0
+            ? $"None among {conversions.Count} completed conversions."
+            : $"{hits} of {conversions.Count} completed conversions. Where \"Now\" still matches \"After\", the file has not been replaced since.");
+    }
+
+    private static string KeptName(TrackSnapshot t) =>
+        t.IsCommentary ? $"{t.LanguageName} commentary" : t.IsVisualImpaired ? $"{t.LanguageName} audio description" : t.LanguageName;
 
     private static bool Unlabeled(TrackSnapshot t) =>
         t.LanguageName is IsoLanguage.UnknownName or IsoLanguage.UndeterminedName;

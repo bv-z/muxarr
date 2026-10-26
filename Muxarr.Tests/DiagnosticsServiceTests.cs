@@ -209,6 +209,11 @@ public class DiagnosticsServiceTests
             LanguageCode = IsoLanguage.Find(language).ThreeLetterCode ?? "und", Codec = codec, AudioChannels = 6,
             IsDefault = isDefault, IsOriginal = original
         };
+        static TrackSnapshot C(int index) => new()
+        {
+            Index = index, Type = Muxarr.Core.Models.MediaTrackType.Audio, LanguageName = "English",
+            LanguageCode = "eng", Codec = "Ac3", AudioChannels = 2, IsCommentary = true
+        };
         static TrackSnapshot S(int index, string language) => new()
         {
             Index = index, Type = Muxarr.Core.Models.MediaTrackType.Subtitles, LanguageName = language,
@@ -246,6 +251,9 @@ public class DiagnosticsServiceTests
                 [A(1, "English", "Ac3", isDefault: true), S(2, "Undetermined"), S(3, "English")], [A(1, "English", "Ac3", isDefault: true), S(2, "English")]);
             Converted("Show/Season 1/Show S01E02.mkv", "English",
                 [A(1, "English", "Ac3", isDefault: true), S(2, "Undetermined"), S(3, "English")], [A(1, "English", "Ac3", isDefault: true), S(2, "English")]);
+            // The film went, two commentaries stayed.
+            Converted("Dogtown (2005)/Dogtown (2005).mkv", "English",
+                [A(1, "Undetermined", "Dts", isDefault: true), C(2), C(3)], [C(1), C(2)]);
             // Its only subtitle was retagged, not removed.
             Converted("Retagged (2020)/Retagged (2020).mkv", "English",
                 [A(1, "English", "Ac3", isDefault: true), S(2, "Undetermined")], [A(1, "English", "Ac3", isDefault: true), S(2, "English")]);
@@ -265,6 +273,10 @@ public class DiagnosticsServiceTests
         Assert.IsTrue(main.IndexOf("marked the removed track as its original", StringComparison.Ordinal)
                       < main.IndexOf("Flagged (2010)", StringComparison.Ordinal), main);
         Assert.IsFalse(main.Contains("Normal (2015)"), main);
+
+        var extras = SectionOf("Past conversions that left only commentary or audio description");
+        StringAssert.Contains(extras, "Dogtown");
+        StringAssert.Contains(extras, "1 of 7 completed conversions.");
 
         var subs = SectionOf("Past conversions that removed an unlabeled subtitle");
         StringAssert.Contains(subs, "Show: 2 files; removed SRT x2; kept English");
