@@ -81,6 +81,11 @@ jobs:
                     context: Muxarr.Web
                     platforms: linux/amd64
                     build-args: FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
+                    # A newer base image, and the runtime stage rebuilt every time, so
+                    # Ubuntu security updates land on the next push instead of waiting
+                    # for the cache to miss.
+                    pull: true
+                    no-cache-filters: runtime
                     push: true
                     tags: |
                         ${{ env.IMAGE }}:custom

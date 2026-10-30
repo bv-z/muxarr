@@ -21,12 +21,15 @@ RUN set -eux; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /out --strip-components=2 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'; \
     /out/ffmpeg -version
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 ARG MKVTOOLNIX_VERSION
 
+# Ubuntu's security updates first: the base image can trail them (libbrotli1 for
+# CVE-2026-111497 shipped a day after the .NET release it was built with).
 # mkvtoolnix from the project's own repo; the Ubuntu one in the base image is v82 from 2024.
 # The key is checked against the fingerprint published on mkvtoolnix.download/authenticity.html.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     gosu \
     curl \
     ca-certificates \
