@@ -150,6 +150,11 @@ jobs:
                     context: Muxarr.Web
                     platforms: ${{ matrix.platform }}
                     build-args: FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
+                    # A newer base image, and the runtime stage rebuilt every time, so
+                    # Ubuntu security updates land in the next release instead of waiting
+                    # for the cache to miss.
+                    pull: true
+                    no-cache-filters: runtime
                     labels: ${{ steps.meta.outputs.labels }}
                     outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
                     cache-from: type=gha,scope=${{ matrix.platform }}
