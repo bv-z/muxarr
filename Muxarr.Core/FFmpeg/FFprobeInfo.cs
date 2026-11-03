@@ -42,6 +42,10 @@ public class FFprobeStream
     [JsonPropertyName("duration")]
     public string? Duration { get; set; }
 
+    // Packets in the stream, where the container records it (MP4 and MOV do).
+    [JsonPropertyName("nb_frames")]
+    public string? NbFrames { get; set; }
+
     // String to tolerate ffprobe's "N/A" for non-video streams.
     [JsonPropertyName("bits_per_raw_sample")]
     public string? BitsPerRawSample { get; set; }

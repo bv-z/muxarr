@@ -154,22 +154,32 @@ public static class FFmpeg
         }
 
         var muxerFormat = GetMp4MuxerFormat(input);
-        var pictures = muxerFormat == "mp4" ? await GetAttachedPictures(input) : [];
+        var streams = (await GetStreamInfo(input)).Result?.Streams ?? [];
+        var pictures = muxerFormat == "mp4" ? GetAttachedPictures(streams) : [];
         var args = BuildRemuxArguments(input, output, delta, muxerFormat, trimToMs, pictures);
 
+        // ffmpeg counts frames of the first video stream it writes, which is the
+        // plan's first video track.
+        var firstVideo = delta.Tracks.FirstOrDefault(t => t.Type == MediaTrackType.Video);
+        var totalFrames = firstVideo != null &&
+                          long.TryParse(streams.FirstOrDefault(s => s.Index == firstVideo.Index)?.NbFrames, out var frames)
+            ? frames
+            : 0;
+
         // A trimmed output stops at the cut, so that is what progress runs to.
-        return await ExecuteAsync(args, trimToMs ?? sourceDurationMs, onProgress, timeout);
+        var progress = new FFmpegProgress(trimToMs ?? sourceDurationMs,
+            trimToMs == null ? totalFrames : 0, new FileInfo(input).Length);
+        return await ExecuteAsync(args, progress, onProgress, timeout);
     }
 
     // Cover art: video streams with the attached_pic disposition. They are not tracks, so the
     // plan never lists them.
-    private static async Task<List<int>> GetAttachedPictures(string input)
+    private static List<int> GetAttachedPictures(IEnumerable<FFprobeStream> streams)
     {
-        var info = await GetStreamInfo(input);
-        return info.Result?.Streams
+        return streams
             .Where(s => s.CodecType == "video" && s.Disposition?.AttachedPic == 1)
             .Select(s => s.Index)
-            .ToList() ?? [];
+            .ToList();
     }
 
     internal static string GetMp4MuxerFormat(string path)
@@ -330,11 +340,15 @@ public static class FFmpeg
         return sb.ToString();
     }
 
-    public static async Task<ProcessResult> ExecuteAsync(string arguments, long durationMs,
+    public static Task<ProcessResult> ExecuteAsync(string arguments, long durationMs,
         Action<string, int>? onProgress = null, TimeSpan? timeout = null)
     {
-        var lastProgress = 0;
+        return ExecuteAsync(arguments, new FFmpegProgress(durationMs), onProgress, timeout);
+    }
 
+    private static async Task<ProcessResult> ExecuteAsync(string arguments, FFmpegProgress progress,
+        Action<string, int>? onProgress, TimeSpan? timeout)
+    {
         return await ProcessExecutor.ExecuteProcessAsync(
             FfmpegExecutable,
             arguments,
@@ -343,17 +357,7 @@ public static class FFmpeg
 
         void OnOutputLine(string line, bool isError)
         {
-            if (!isError && line.StartsWith("out_time_us=", StringComparison.Ordinal))
-            {
-                var raw = line.Substring("out_time_us=".Length);
-                if (long.TryParse(raw, out var outTimeUs) && durationMs > 0)
-                {
-                    var percent = (int)(outTimeUs / 1000 * 100 / durationMs);
-                    lastProgress = Math.Clamp(percent, 0, 100);
-                }
-            }
-
-            onProgress?.Invoke(line, lastProgress);
+            onProgress?.Invoke(line, isError ? progress.Percent : progress.Update(line));
         }
     }
 
