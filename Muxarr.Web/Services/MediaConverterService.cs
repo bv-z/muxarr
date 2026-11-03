@@ -515,6 +515,14 @@ public class MediaConverterService(
         else if (result.Strategy == ConversionPlanner.ConversionStrategy.MetadataEdit)
         {
             await RunMkvPropEditInPlaceAsync(conversion, delta, context, token);
+
+            // An edit that did not stick falls through to a remux of the file it just
+            // changed. That edited file is the one the copy is made from, so the check
+            // before the swap must compare against it, not mistake the edit for an upgrade.
+            if (conversion.State is not (ConversionState.Completed or ConversionState.Failed))
+            {
+                source = FileStamp.Of(conversion.MediaFile.Path);
+            }
         }
 
         if (conversion.State is ConversionState.Completed or ConversionState.Failed)
@@ -650,7 +658,9 @@ public class MediaConverterService(
         var verify = ConversionPlanner.Plan(mediaFile.Snapshot, conversion.ConversionPlan);
         if (verify.Strategy != ConversionPlanner.ConversionStrategy.Skip)
         {
-            conversion.Log("mkvpropedit reported success but some changes did not apply. Falling through to remux.",
+            var stuck = mediaFile.Snapshot.DescribeChangesTo(conversion.ConversionPlan);
+            conversion.Log("mkvpropedit reported success but some changes did not apply" +
+                           (stuck.Count > 0 ? $" ({string.Join(", ", stuck)})" : "") + ". Falling through to remux.",
                 logger);
             return;
         }

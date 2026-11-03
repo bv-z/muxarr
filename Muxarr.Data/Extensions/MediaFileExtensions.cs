@@ -1086,17 +1086,20 @@ public static class MediaFileExtensions
     /// </summary>
     public static List<string> DescribeMetadataChanges(this MediaFile file, Profile? profile)
     {
-        var changes = new List<string>();
-        if (profile == null)
-        {
-            return changes;
-        }
+        return profile == null ? [] : file.Snapshot.DescribeChangesTo(file.BuildTargetFromProfile(profile));
+    }
 
-        var target = file.BuildTargetFromProfile(profile);
-        var originals = file.Snapshot.Tracks.ToDictionary(t => t.Index);
-        if (target.Title != null && !string.Equals(target.Title, file.Snapshot.Title ?? "", StringComparison.Ordinal))
+    /// <summary>
+    /// The metadata a plan would still change on this snapshot, one entry per field.
+    /// Tracks the plan leaves out are not listed.
+    /// </summary>
+    public static List<string> DescribeChangesTo(this MediaSnapshot snapshot, ConversionPlan target)
+    {
+        var changes = new List<string>();
+        var originals = snapshot.Tracks.ToDictionary(t => t.Index);
+        if (target.Title != null && !string.Equals(target.Title, snapshot.Title ?? "", StringComparison.Ordinal))
         {
-            changes.Add($"file title: \"{file.Snapshot.Title}\" -> \"{target.Title}\"");
+            changes.Add($"file title: \"{snapshot.Title}\" -> \"{target.Title}\"");
         }
 
         static string YesNo(bool value) => value ? "yes" : "no";
