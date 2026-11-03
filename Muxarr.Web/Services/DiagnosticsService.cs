@@ -51,6 +51,7 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
         WriteOnlyExtrasLeft(sb, history);
         WriteRemovedMainAudio(sb, history, profiles);
         WriteLostUnlabeledSubtitles(sb, history, profiles);
+        await WriteRelabeledDolbyVision(sb, context, token);
         await WriteConversions(sb, context, token);
         await WriteLog(sb, context, token);
 
@@ -479,6 +480,101 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
 
     private static string KeptName(TrackSnapshot t) =>
         t.IsCommentary ? $"{t.LanguageName} commentary" : t.IsVisualImpaired ? $"{t.LanguageName} audio description" : t.LanguageName;
+
+    // The sample entry names MP4 gives a Dolby Vision video track.
+    private static readonly HashSet<string> DolbyVisionTags = ["dvhe", "dvh1", "dvav", "dva1", "dav1"];
+
+    private static readonly Regex VideoStreamLine =
+        new(@"Stream #0:(\d+)\S*: Video: \w+(?: \([^)/]*\))* \((\w{4}) / 0x[0-9A-Fa-f]+\)", RegexOptions.Compiled);
+
+    private static readonly Regex StreamMappingLine = new(@"Stream #0:(\d+) -> #0:(\d+)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// MP4 conversions whose Dolby Vision video track came out under a different sample
+    /// entry name. ffmpeg cannot write dvhe, so the enhancement-layer track of a dual-track
+    /// profile 7 MP4 (a DVDFab rip) came out as hev1, its Dolby Vision settings
+    /// still inside. Read from ffmpeg's own stream listing in each conversion log.
+    /// </summary>
+    private static async Task WriteRelabeledDolbyVision(StringBuilder sb, AppDbContext context, CancellationToken token)
+    {
+        Section(sb, "Past conversions that relabeled a Dolby Vision video track");
+        var ids = await context.Set<ConversionLogEntry>().AsNoTracking()
+            .Where(e => e.Message.Contains("(dvhe /") || e.Message.Contains("(dvh1 /") || e.Message.Contains("(dvav /")
+                        || e.Message.Contains("(dva1 /") || e.Message.Contains("(dav1 /"))
+            .Select(e => e.MediaConversionId)
+            .Distinct()
+            .ToListAsync(token);
+
+        var hits = 0;
+        foreach (var id in ids.Order())
+        {
+            var lines = await context.Set<ConversionLogEntry>().AsNoTracking()
+                .Where(e => e.MediaConversionId == id)
+                .OrderBy(e => e.Id)
+                .Select(e => e.Message)
+                .ToListAsync(token);
+            var changes = RelabeledDolbyVisionTracks(lines);
+            if (changes.Count == 0)
+            {
+                continue;
+            }
+
+            var conversion = await context.MediaConversions.AsNoTracking()
+                .Include(c => c.MediaFile)
+                .FirstAsync(c => c.Id == id, token);
+            hits++;
+            sb.AppendLine($"  #{id} {conversion.Name} ({conversion.State}, {Time(conversion.UpdatedDate)}): " +
+                          $"{string.Join(", ", changes)} - {conversion.MediaFile?.Path ?? "(file no longer in the library)"}");
+        }
+
+        sb.AppendLine(hits == 0
+            ? $"None among {ids.Count} conversions of files with a Dolby Vision sample entry."
+            : $"{hits} conversion(s). The Dolby Vision settings stay in the track; only the name it is filed under changed.");
+    }
+
+    // "track 1: dvhe -> hev1" for each Dolby Vision input stream whose output stream has
+    // another tag. The input listing comes first, the output listing after "Output #0".
+    public static List<string> RelabeledDolbyVisionTracks(IEnumerable<string> logLines)
+    {
+        var input = new Dictionary<int, string>();
+        var output = new Dictionary<int, string>();
+        var mapping = new Dictionary<int, int>();
+        var inOutput = false;
+        foreach (var line in logLines)
+        {
+            if (line.TrimStart().StartsWith("Input #0", StringComparison.Ordinal))
+            {
+                // A retried run logs a fresh listing; only the last one counts.
+                input.Clear();
+                output.Clear();
+                mapping.Clear();
+                inOutput = false;
+            }
+            else if (line.TrimStart().StartsWith("Output #0", StringComparison.Ordinal))
+            {
+                inOutput = true;
+            }
+
+            if (StreamMappingLine.Match(line) is { Success: true } map)
+            {
+                mapping[int.Parse(map.Groups[1].Value)] = int.Parse(map.Groups[2].Value);
+                continue;
+            }
+
+            if (VideoStreamLine.Match(line) is { Success: true } stream)
+            {
+                (inOutput ? output : input)[int.Parse(stream.Groups[1].Value)] = stream.Groups[2].Value;
+            }
+        }
+
+        return input
+            .Where(i => DolbyVisionTags.Contains(i.Value)
+                        && mapping.TryGetValue(i.Key, out var o)
+                        && output.TryGetValue(o, out var tag) && tag != i.Value)
+            .OrderBy(i => i.Key)
+            .Select(i => $"track {i.Key}: {i.Value} -> {output[mapping[i.Key]]}")
+            .ToList();
+    }
 
     private static bool Unlabeled(TrackSnapshot t) =>
         t.LanguageName is IsoLanguage.UnknownName or IsoLanguage.UndeterminedName;
