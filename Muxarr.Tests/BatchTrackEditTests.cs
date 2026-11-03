@@ -267,6 +267,108 @@ public class BatchTrackEditTests
         Assert.AreEqual(BatchOutcome.NoMatchingTrack, result.Outcome);
     }
 
+    // --- Removing tracks ---
+
+    [TestMethod]
+    [DataRow("Matroska")]
+    [DataRow("MP4/QuickTime")]
+    public void Remove_LeavesTheTrackOutAndRemuxes(string container)
+    {
+        var file = MakeFileWithContainer(container,
+            Video(0), Audio(1, "English", isDefault: true), Audio(2, "Italian"), Sub(3, "English"));
+
+        var result = Apply(file, [AudioSlot(1, e => e.Remove = true)]);
+
+        Assert.AreEqual(BatchOutcome.Changed, result.Outcome);
+        CollectionAssert.AreEqual(new[] { 0, 1, 3 }, result.Plan!.Tracks.Select(t => t.Index).ToArray());
+        Assert.AreEqual(ConversionPlanner.ConversionStrategy.Remux, ConversionPlanner.Plan(file.Snapshot, result.Plan).Strategy);
+    }
+
+    [TestMethod]
+    public void Remove_OnlyWhereLanguage_LeavesOtherFilesAlone()
+    {
+        var italian = MakeFileWithContainer("Matroska", Video(0), Audio(1, "English", isDefault: true), Audio(2, "Italian"));
+        var english = MakeFileWithContainer("Matroska", Video(0), Audio(1, "English", isDefault: true), Audio(2, "English"));
+        var edit = AudioSlot(1, e =>
+        {
+            e.Remove = true;
+            e.OnlyWhereLanguage = "Italian";
+        });
+
+        var preview = Preview([italian, english], [edit]);
+
+        Assert.AreEqual(BatchOutcome.Changed, preview.Results[0].Outcome);
+        Assert.AreEqual(BatchOutcome.NoMatchingTrack, preview.Results[1].Outcome);
+        Assert.AreEqual(1, preview.Changed);
+    }
+
+    [TestMethod]
+    public void Remove_NeverLeavesAFileWithoutAudio()
+    {
+        var single = MakeFileWithContainer("Matroska", Video(0), Audio(1, "Italian", isDefault: true), Sub(2, "Italian"));
+        var both = MakeFileWithContainer("Matroska", Video(0), Audio(1, "Italian", isDefault: true), Audio(2, "German"));
+        BatchSlotEdit[] edits = [AudioSlot(0, e => e.Remove = true), AudioSlot(1, e => e.Remove = true)];
+
+        var preview = Preview([single, both], edits);
+
+        Assert.AreEqual(0, preview.Changed, "neither file may lose all its audio");
+        CollectionAssert.Contains(preview.Skipped, NoAudioLeft);
+    }
+
+    [TestMethod]
+    public void Remove_StillRemovesTheSubtitlesWhenTheAudioIsRefused()
+    {
+        var file = MakeFileWithContainer("Matroska", Video(0), Audio(1, "Italian", isDefault: true), Sub(2, "Italian"));
+        var subtitle = new BatchSlotEdit { Slot = new TrackSlot(MediaTrackType.Subtitles, 0), Remove = true };
+
+        var result = Apply(file, [AudioSlot(0, e => e.Remove = true), subtitle]);
+
+        Assert.AreEqual(BatchOutcome.Changed, result.Outcome);
+        CollectionAssert.AreEqual(new[] { 0, 1 }, result.Plan!.Tracks.Select(t => t.Index).ToArray());
+        CollectionAssert.Contains(result.Skipped.ToList(), NoAudioLeft);
+    }
+
+    [TestMethod]
+    public void Remove_TheDefaultAudio_HandsTheDefaultToTheFirstTrackLeft()
+    {
+        var file = MakeFileWithContainer("Matroska",
+            Video(0), Audio(1, "Italian", isDefault: true), Audio(2, "English"), Audio(3, "German"));
+
+        var result = Apply(file, [AudioSlot(0, e => e.Remove = true)]);
+
+        Assert.IsTrue(result.Plan!.Tracks.Single(t => t.Index == 2).IsDefault);
+        Assert.IsNull(result.Plan.Tracks.Single(t => t.Index == 3).IsDefault);
+    }
+
+    [TestMethod]
+    public void Remove_TheDefaultSubtitle_DoesNotSwitchAnotherOneOn()
+    {
+        var file = MakeFileWithContainer("Matroska", Video(0), Audio(1, "English", isDefault: true), Sub(2, "Italian"), Sub(3, "English"));
+        file.Snapshot.Tracks.Single(t => t.Index == 2).IsDefault = true;
+        var subtitle = new BatchSlotEdit { Slot = new TrackSlot(MediaTrackType.Subtitles, 0), Remove = true };
+
+        var result = Apply(file, [subtitle]);
+
+        Assert.IsNull(result.Plan!.Tracks.Single(t => t.Index == 3).IsDefault);
+        var delta = ConversionPlanExtensions.Delta(file.Snapshot, result.Plan);
+        Assert.IsNull(delta.Tracks.Single(t => t.Index == 3).IsDefault);
+    }
+
+    [TestMethod]
+    public void Remove_OverridesTheRowsOtherEdits()
+    {
+        var file = MakeFileWithContainer("Matroska", Video(0), Audio(1, "English", isDefault: true), Audio(2, "Italian"));
+
+        var result = Apply(file, [AudioSlot(1, e =>
+        {
+            e.Remove = true;
+            e.LanguageName = "German";
+        })]);
+
+        CollectionAssert.AreEqual(new[] { 0, 1 }, result.Plan!.Tracks.Select(t => t.Index).ToArray());
+        Assert.IsNull(ConversionPlanExtensions.Delta(file.Snapshot, result.Plan).Tracks.Single(t => t.Index == 1).LanguageCode);
+    }
+
     private static BatchSlotEdit AudioSlot(int ordinal, Action<BatchSlotEdit> configure)
     {
         var edit = new BatchSlotEdit { Slot = new TrackSlot(MediaTrackType.Audio, ordinal) };

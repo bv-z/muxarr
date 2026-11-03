@@ -27,6 +27,9 @@ public static class BatchTrackEdit
     {
         public TrackSlot Slot { get; init; }
 
+        // Leaves the track out of the file. Overrides every other edit on the slot.
+        public bool Remove { get; set; }
+
         // Null applies the edit to every file, not just one language.
         public string? OnlyWhereLanguage { get; set; }
 
@@ -40,7 +43,7 @@ public static class BatchTrackEdit
         public bool? IsDub { get; set; }
 
         public bool HasAnyEdit =>
-            LanguageName != null || Name != null || ClearName ||
+            Remove || LanguageName != null || Name != null || ClearName ||
             IsDefault != null || IsForced != null || IsHearingImpaired != null ||
             IsCommentary != null || IsDub != null;
     }
@@ -89,6 +92,11 @@ public static class BatchTrackEdit
             .ToList();
     }
 
+    public const string NoAudioLeft =
+        "Audio was not removed from files where it would leave no audio track.";
+
+    public const string VideoNotRemoved = "Video tracks are never removed.";
+
     public static BatchPreview Preview(IEnumerable<MediaFile> files, IReadOnlyList<BatchSlotEdit> edits)
     {
         var results = files.Select(f => Apply(f, edits)).ToList();
@@ -120,6 +128,7 @@ public static class BatchTrackEdit
         var bySlot = Slots(file).ToDictionary(x => x.Slot, x => x.Track);
         var skipped = new List<string>();
         var matchedAnySlot = false;
+        var removals = new List<TrackSnapshot>();
 
         foreach (var edit in edits)
         {
@@ -137,6 +146,20 @@ public static class BatchTrackEdit
             }
 
             matchedAnySlot = true;
+            if (edit.Remove)
+            {
+                if (source.Type == MediaTrackType.Video)
+                {
+                    skipped.Add(VideoNotRemoved);
+                }
+                else
+                {
+                    removals.Add(source);
+                }
+
+                continue;
+            }
+
             ApplyToTrack(edit, source, planByIndex[source.Index], family, skipped);
         }
 
@@ -145,13 +168,48 @@ public static class BatchTrackEdit
             return new BatchApplyResult(file, null, BatchOutcome.NoMatchingTrack, skipped);
         }
 
+        Remove(plan, tracks, removals, skipped);
         TargetResolver.ResolveForContainer(plan, snapshot);
 
         var delta = ConversionPlanExtensions.Delta(snapshot, plan);
-        var changed = ConversionPlanExtensions.HasChanges(delta);
+        var changed = ConversionPlanExtensions.HasChanges(delta) || plan.Tracks.Count != tracks.Count;
 
         return new BatchApplyResult(file, plan,
             changed ? BatchOutcome.Changed : BatchOutcome.Unchanged, skipped);
+    }
+
+    // Takes the removed tracks out of the plan. A file is never left without audio:
+    // when the rows would remove every audio track it has, its audio stays as it
+    // is. Removing the default audio track hands the default to the first one left,
+    // so players do not fall back to a guess. Subtitles get no new default, as that
+    // would switch subtitles on.
+    private static void Remove(ConversionPlan plan, List<TrackSnapshot> tracks, List<TrackSnapshot> removals,
+        List<string> skipped)
+    {
+        var audio = tracks.Where(t => t.Type == MediaTrackType.Audio).ToList();
+        if (audio.Count > 0 && audio.All(removals.Contains))
+        {
+            removals.RemoveAll(t => t.Type == MediaTrackType.Audio);
+            skipped.Add(NoAudioLeft);
+        }
+
+        if (removals.Count == 0)
+        {
+            return;
+        }
+
+        var removed = removals.Select(t => t.Index).ToHashSet();
+        plan.Tracks.RemoveAll(t => removed.Contains(t.Index));
+
+        if (removals.Any(t => t.Type == MediaTrackType.Audio && t.IsDefault))
+        {
+            var sourceByIndex = tracks.ToDictionary(t => t.Index);
+            var keptAudio = plan.Tracks.Where(t => t.Type == MediaTrackType.Audio).ToList();
+            if (!keptAudio.Any(t => t.IsDefault ?? sourceByIndex[t.Index].IsDefault))
+            {
+                keptAudio.OrderBy(t => t.Index).First().IsDefault = true;
+            }
+        }
     }
 
     private static void ApplyToTrack(BatchSlotEdit edit, TrackSnapshot source, TrackPlan target,
