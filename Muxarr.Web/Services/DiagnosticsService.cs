@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Muxarr.Core.Config;
 using Muxarr.Core.Extensions;
+using Muxarr.Core.FFmpeg;
 using Muxarr.Core.Language;
 using Muxarr.Core.Models;
 using Muxarr.Core.Utilities;
@@ -481,19 +482,21 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
     private static string KeptName(TrackSnapshot t) =>
         t.IsCommentary ? $"{t.LanguageName} commentary" : t.IsVisualImpaired ? $"{t.LanguageName} audio description" : t.LanguageName;
 
-    // The sample entry names MP4 gives a Dolby Vision video track.
-    private static readonly HashSet<string> DolbyVisionTags = ["dvhe", "dvh1", "dvav", "dva1", "dav1"];
-
     private static readonly Regex VideoStreamLine =
         new(@"Stream #0:(\d+)\S*: Video: \w+(?: \([^)/]*\))* \((\w{4}) / 0x[0-9A-Fa-f]+\)", RegexOptions.Compiled);
 
     private static readonly Regex StreamMappingLine = new(@"Stream #0:(\d+) -> #0:(\d+)", RegexOptions.Compiled);
 
+    // Logged after ffmpeg finishes when Muxarr puts a Dolby Vision name back.
+    private static readonly Regex RestoredNameLine =
+        new(@"Filed output track (\d+) as '(\w{4})' again", RegexOptions.Compiled);
+
     /// <summary>
     /// MP4 conversions whose Dolby Vision video track came out under a different sample
     /// entry name. ffmpeg cannot write dvhe, so the enhancement-layer track of a dual-track
     /// profile 7 MP4 (a DVDFab rip) came out as hev1, its Dolby Vision settings
-    /// still inside. Read from ffmpeg's own stream listing in each conversion log.
+    /// still inside. Read from ffmpeg's own stream listing in each conversion log, and from
+    /// the line Muxarr logs once it has put the name back.
     /// </summary>
     private static async Task WriteRelabeledDolbyVision(StringBuilder sb, AppDbContext context, CancellationToken token)
     {
@@ -564,11 +567,17 @@ public class DiagnosticsService(IDbContextFactory<AppDbContext> contextFactory)
             if (VideoStreamLine.Match(line) is { Success: true } stream)
             {
                 (inOutput ? output : input)[int.Parse(stream.Groups[1].Value)] = stream.Groups[2].Value;
+                continue;
+            }
+
+            if (RestoredNameLine.Match(line) is { Success: true } restored)
+            {
+                output[int.Parse(restored.Groups[1].Value)] = restored.Groups[2].Value;
             }
         }
 
         return input
-            .Where(i => DolbyVisionTags.Contains(i.Value)
+            .Where(i => Mp4SampleEntries.IsDolbyVision(i.Value)
                         && mapping.TryGetValue(i.Key, out var o)
                         && output.TryGetValue(o, out var tag) && tag != i.Value)
             .OrderBy(i => i.Key)

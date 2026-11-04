@@ -535,21 +535,6 @@ public class MediaConverterService(
             return;
         }
 
-        // Checked before any copying: ffmpeg would write the whole file only to have it refused.
-        if (conversion.MediaFile.Snapshot.ContainerType.ToContainerFamily() != ContainerFamily.Matroska &&
-            OutputValidator.UnwritableDolbyVisionSampleEntry(
-                (await FFmpeg.GetStreamInfo(conversion.MediaFile.Path)).Result, conversion.ConversionPlan) is { } tag)
-        {
-            conversion.Log($"Left as it is: this file's Dolby Vision video is filed as '{tag}', a name ffmpeg cannot " +
-                           "write. Converting it would refile the track as plain HEVC ('hev1'), and a player that goes " +
-                           "by that name could lose the Dolby Vision. Nothing was changed.", logger, true);
-            conversion.State = ConversionState.Failed;
-            context.Update(conversion);
-            await context.SaveChangesAsync(token);
-            ConverterStateChanged?.Invoke(new ConverterProgressEvent(conversion));
-            return;
-        }
-
         // The copy is written next to the original, so that disk needs room for about one more of it.
         var directory = Path.GetDirectoryName(conversion.MediaFile.Path)!;
         if (FileHelper.GetAvailableFreeSpace(directory) is { } free && free < conversion.MediaFile.Size)

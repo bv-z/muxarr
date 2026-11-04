@@ -9,14 +9,14 @@ namespace Muxarr.Tests.Integration;
 /// <summary>
 /// Dolby Vision profile 5 in an MP4, filed under dvhe. ffmpeg cannot
 /// write dvhe, so a remux refiled it as hev1 with its Dolby Vision settings still inside,
-/// and a player that goes by the name sees plain HEVC. Such a file is now left alone,
-/// and any output that renames a Dolby Vision track is refused.
+/// and a player that goes by the name sees plain HEVC: the file stopped playing. The
+/// name is now put back after ffmpeg finishes, and any output still renamed is refused.
 /// </summary>
 [TestClass]
 public class DolbyVisionSampleEntryTests : IntegrationTestBase
 {
     [TestMethod]
-    public async Task DvheMp4_IsLeftAsItIs()
+    public async Task DvheMp4_ConvertsAndKeepsItsName()
     {
         var path = CopyFixture("dv_p5_dvhe.mp4");
         var hash = FileAssertions.Sha256(path);
@@ -28,10 +28,17 @@ public class DolbyVisionSampleEntryTests : IntegrationTestBase
 
         await Fixture.Converter.RunAsync(CancellationToken.None);
 
-        var done = await Fixture.AssertStateAsync(conversion.Id, ConversionState.Failed);
-        StringAssert.Contains(done.LogText(), "filed as 'dvhe', a name ffmpeg cannot write");
-        Assert.IsFalse(done.LogText().Contains("Starting ffmpeg"), "nothing should have been copied");
-        FileAssertions.AssertSha256Equals(path, hash, "the file must not be touched");
+        var done = await Fixture.AssertStateAsync(conversion.Id, ConversionState.Completed);
+        FileAssertions.AssertSha256NotEquals(path, hash, "the converted copy replaces the original");
+        var probe = (await FFmpeg.GetStreamInfo(path)).Result!;
+        var video = probe.Streams.Single(s => s.CodecType == "video");
+        Assert.AreEqual("dvhe", video.CodecTagString, done.LogText());
+        Assert.IsNotNull(video.DolbyVisionConfig, "the Dolby Vision settings stay inside");
+        Assert.AreEqual("English", (await FileAssertions.ProbeAsync(path)).Snapshot.Tracks
+            .Single(t => t.Type == MediaTrackType.Audio).Name, "the edit itself applied");
+        StringAssert.Contains(done.LogText(), "Filed output track 0 as 'dvhe' again: ffmpeg wrote 'hev1'");
+        Assert.AreEqual(0, DiagnosticsService.RelabeledDolbyVisionTracks(done.LogEntries.OrderBy(e => e.Id).Select(e => e.Message)).Count,
+            "the export must not list it as relabeled");
         FileAssertions.AssertNoStrayArtifacts(TempDir, Path.GetFileName(path));
     }
 

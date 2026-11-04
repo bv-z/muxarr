@@ -75,6 +75,24 @@ public class RelabeledDolbyVisionTests
     }
 
     [TestMethod]
+    public void NameRestoredAfterTheRun_IsNotReported()
+    {
+        var log = DualLayerLog.Append(
+            "Filed output track 1 as 'dvhe' again: ffmpeg wrote 'hev1', a name players read as video without Dolby Vision.");
+
+        Assert.AreEqual(0, DiagnosticsService.RelabeledDolbyVisionTracks(log).Count);
+    }
+
+    [TestMethod]
+    public void NameRestoredOnAnotherTrack_StillReportsThisOne()
+    {
+        var log = DualLayerLog.Append(
+            "Filed output track 0 as 'dvhe' again: ffmpeg wrote 'hev1', a name players read as video without Dolby Vision.");
+
+        CollectionAssert.AreEqual(new[] { "track 1: dvhe -> hev1" }, DiagnosticsService.RelabeledDolbyVisionTracks(log));
+    }
+
+    [TestMethod]
     public async Task Report_ListsTheConversion()
     {
         var path = Path.Combine(Path.GetTempPath(), $"muxarr_dv_{Guid.NewGuid():N}.db");

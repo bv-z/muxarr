@@ -101,36 +101,17 @@ public static class OutputValidator
         for (var i = 0; i < target.Tracks.Count && i < written.Count; i++)
         {
             var from = sourceDv.FirstOrDefault(s => s.Index == target.Tracks[i].Index);
-            if (from != null && IsDolbyVisionSampleEntry(from.CodecTagString) &&
+            // The ffmpeg writer puts a Dolby Vision name back (Mp4SampleEntries); this catches
+            // one it could not.
+            if (from != null && Mp4SampleEntries.IsDolbyVision(from.CodecTagString) &&
                 written[i].CodecTagString != from.CodecTagString)
             {
                 throw new Exception(
                     $"Output files the Dolby Vision video track as '{written[i].CodecTagString}' instead of " +
-                    $"'{from.CodecTagString}', and a player that goes by that name reads it as plain HEVC. " +
+                    $"'{from.CodecTagString}', and a player that goes by that name reads it as video without Dolby Vision. " +
                     "Refusing to replace the original.");
             }
         }
-    }
-
-    // MP4 sample entries that mark a track as Dolby Vision by name. Matroska has none.
-    public static bool IsDolbyVisionSampleEntry(string? tag)
-    {
-        return tag is "dvhe" or "dvh1" or "dvav" or "dva1" or "dav1";
-    }
-
-    /// <summary>
-    /// A kept Dolby Vision track filed under a sample entry name ffmpeg cannot write.
-    /// ffmpeg turns dvhe into hev1, so such an MP4 is left alone instead of remuxed and
-    /// then refused.
-    /// </summary>
-    public static string? UnwritableDolbyVisionSampleEntry(FFprobeResult? source, ConversionPlan target)
-    {
-        var keptVideo = target.Tracks.Where(t => t.Type == MediaTrackType.Video).Select(t => t.Index).ToHashSet();
-        return source == null
-            ? null
-            : DolbyVisionVideo(source).Where(s => keptVideo.Contains(s.Index))
-                .Select(s => s.CodecTagString)
-                .FirstOrDefault(tag => tag == "dvhe");
     }
 
     private static IEnumerable<FFprobeStream> DolbyVisionVideo(FFprobeResult probe)
