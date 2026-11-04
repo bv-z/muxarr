@@ -8,9 +8,8 @@ namespace Muxarr.Tests.Integration;
 
 /// <summary>
 /// Dolby Vision profile 5 in an MP4, filed under dvhe. ffmpeg cannot
-/// write dvhe, so a remux refiled it as hev1 with its Dolby Vision settings still inside,
-/// and a player that goes by the name sees plain HEVC: the file stopped playing. The
-/// name is now put back after ffmpeg finishes, and any output still renamed is refused.
+/// write dvhe, so a remux refiled it as hev1 with its Dolby Vision settings still inside.
+/// The name is now put back after ffmpeg finishes, and any output still renamed is refused.
 /// </summary>
 [TestClass]
 public class DolbyVisionSampleEntryTests : IntegrationTestBase

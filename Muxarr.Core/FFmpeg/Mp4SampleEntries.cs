@@ -6,8 +6,8 @@ namespace Muxarr.Core.FFmpeg;
 /// The names an MP4 files its video tracks under (the sample entry in each track's stsd box).
 /// Dolby Vision has names of its own, and ffmpeg's mp4 muxer cannot write some of them: a
 /// dvhe track comes out as hev1. The box is otherwise the same, its Dolby Vision settings
-/// (dvcC/dvvC) still inside, but a player that goes by the name sees plain HEVC, and a
-/// profile 5 track has no plain HEVC to fall back to.
+/// (dvcC/dvvC) still inside, but the copy is filed under the plain codec's name. A stream
+/// copy should keep the name the source had.
 /// </summary>
 public static class Mp4SampleEntries
 {

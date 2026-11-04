@@ -78,7 +78,7 @@ public class RelabeledDolbyVisionTests
     public void NameRestoredAfterTheRun_IsNotReported()
     {
         var log = DualLayerLog.Append(
-            "Filed output track 1 as 'dvhe' again: ffmpeg wrote 'hev1', a name players read as video without Dolby Vision.");
+            "Filed output track 1 as 'dvhe' again: ffmpeg wrote 'hev1', the plain codec's name.");
 
         Assert.AreEqual(0, DiagnosticsService.RelabeledDolbyVisionTracks(log).Count);
     }
@@ -87,7 +87,7 @@ public class RelabeledDolbyVisionTests
     public void NameRestoredOnAnotherTrack_StillReportsThisOne()
     {
         var log = DualLayerLog.Append(
-            "Filed output track 0 as 'dvhe' again: ffmpeg wrote 'hev1', a name players read as video without Dolby Vision.");
+            "Filed output track 0 as 'dvhe' again: ffmpeg wrote 'hev1', the plain codec's name.");
 
         CollectionAssert.AreEqual(new[] { "track 1: dvhe -> hev1" }, DiagnosticsService.RelabeledDolbyVisionTracks(log));
     }

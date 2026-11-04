@@ -204,7 +204,7 @@ public static class FFmpeg
             foreach (var rename in Mp4SampleEntries.RestoreDolbyVisionNames(output, wanted))
             {
                 report($"Filed output track {rename.Track} as '{rename.To}' again: ffmpeg wrote '{rename.From}', " +
-                       "a name players read as video without Dolby Vision.");
+                       "the plain codec's name.");
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

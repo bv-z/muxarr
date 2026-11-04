@@ -108,8 +108,7 @@ public static class OutputValidator
             {
                 throw new Exception(
                     $"Output files the Dolby Vision video track as '{written[i].CodecTagString}' instead of " +
-                    $"'{from.CodecTagString}', and a player that goes by that name reads it as video without Dolby Vision. " +
-                    "Refusing to replace the original.");
+                    $"'{from.CodecTagString}', the plain codec's name. Refusing to replace the original.");
             }
         }
     }
