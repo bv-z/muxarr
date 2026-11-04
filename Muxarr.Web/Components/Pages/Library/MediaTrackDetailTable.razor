@@ -61,10 +61,17 @@
         var originalPositions = Tracks.Select((t, i) => (TrackNumber: t.Index, Index: i))
             .ToDictionary(x => x.TrackNumber, x => x.Index);
 
+        // A track has moved when its place among the kept tracks changed. Removing a
+        // track shifts the ones after it up, and that alone is not a move.
+        var keptInSourceOrder = PreviewTracks
+            .Where(p => originalPositions.ContainsKey(p.Index))
+            .OrderBy(p => originalPositions[p.Index])
+            .Select((p, rank) => (p.Index, rank))
+            .ToDictionary(x => x.Index, x => x.rank);
+
         KeptTracks = [];
-        for (var i = 0; i < PreviewTracks.Count; i++)
+        foreach (var preview in PreviewTracks)
         {
-            var preview = PreviewTracks[i];
             var original = Tracks.FirstOrDefault(t => t.Index == preview.Index);
             if (original == null)
             {
@@ -72,9 +79,9 @@
             }
 
             int? movedFrom = null;
-            if (originalPositions.TryGetValue(preview.Index, out var origIdx) && origIdx != i)
+            if (keptInSourceOrder[preview.Index] != KeptTracks.Count)
             {
-                movedFrom = origIdx + 1;
+                movedFrom = originalPositions[preview.Index] + 1;
             }
 
             KeptTracks.Add(new TrackWithPreview(original, preview, movedFrom));

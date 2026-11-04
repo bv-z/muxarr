@@ -32,7 +32,8 @@
     {
         <p class="mb-3 text-body-secondary">
             Rows are track positions, so <strong>1</strong> under Audio is the first audio track of every one of
-            these @_files.Count files. Only the fields you change are written.
+            these @_files.Count files. Only the fields you change are written. <i class="bi bi-trash"></i> removes the
+            track; pick a language under Apply To to remove it only where it is that language.
         </p>
 
         <div class="row g-4">
@@ -53,6 +54,7 @@
                                 <th>Set Language</th>
                                 <th>Track Name</th>
                                 <th>Flags</th>
+                                <th style="width: 40px;"></th>
                             </tr>
                             </thead>
                             <tbody>
@@ -67,13 +69,13 @@
                                 {
                                     lastType = slot.Slot.Type;
                                     <tr>
-                                        <td colspan="7" class="fw-semibold text-body-secondary small py-1">
+                                        <td colspan="8" class="fw-semibold text-body-secondary small py-1">
                                             <i class="bi @TrackTypeDisplay.Icon(slot.Slot.Type) me-1"></i>@TrackTypeDisplay.Label(slot.Slot.Type)
                                         </td>
                                     </tr>
                                 }
 
-                                <tr>
+                                <tr class="@(edit.Remove ? "table-danger" : null)">
                                     <td class="mux-cell-inline">
                                         @(slot.Slot.Ordinal + 1)
                                         @if (slot.FileCount < _files.Count)
@@ -138,6 +140,7 @@
                                         @if (!isVideo)
                                         {
                                             <select class="form-select form-select-sm" value="@edit.LanguageName"
+                                                    disabled="@edit.Remove"
                                                     @onchange="e => OnLanguageChanged(edit, e.Value?.ToString())">
                                                 <option value="">(unchanged)</option>
                                                 @foreach (var lang in _languages)
@@ -150,12 +153,13 @@
                                     <td data-label="Name">
                                         <div class="d-flex gap-1">
                                             <input type="text" class="form-control form-control-sm"
-                                                   placeholder="@(edit.ClearName ? "(cleared)" : "(unchanged)")"
-                                                   disabled="@edit.ClearName" value="@edit.Name"
+                                                   placeholder="@(edit.Remove ? "(removed)" : edit.ClearName ? "(cleared)" : "(unchanged)")"
+                                                   disabled="@(edit.ClearName || edit.Remove)" value="@edit.Name"
                                                    @onchange="e => OnNameChanged(edit, e.Value?.ToString())"/>
                                             <ToolTip Tip="Clear the track name on every file this row matches">
                                                 <button type="button"
                                                         class="btn btn-sm @(edit.ClearName ? "btn-primary" : "btn-outline-secondary")"
+                                                        disabled="@edit.Remove"
                                                         @onclick="() => ToggleClearName(edit)">
                                                     <i class="bi bi-eraser"></i>
                                                 </button>
@@ -163,7 +167,7 @@
                                         </div>
                                     </td>
                                     <td data-label="Flags">
-                                        @if (!isVideo)
+                                        @if (!isVideo && !edit.Remove)
                                         {
                                             <div class="d-flex gap-1">
                                                 <FlagButton Icon="bi-play-circle"
@@ -192,6 +196,18 @@
                                             </div>
                                         }
                                     </td>
+                                    <td data-label="Remove">
+                                        @if (!isVideo)
+                                        {
+                                            <ToolTip Tip="@(edit.Remove ? "Keep this track" : RemoveTip(edit))">
+                                                <button type="button"
+                                                        class="btn btn-sm @(edit.Remove ? "btn-danger" : "btn-outline-danger")"
+                                                        @onclick="() => ToggleRemove(edit)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </ToolTip>
+                                        }
+                                    </td>
                                 </tr>
                             }
                             </tbody>
@@ -201,9 +217,17 @@
                     @foreach (var warning in _preview.Skipped)
                     {
                         <div class="alert alert-warning py-2 small mt-3 mb-0">
-                            <ToolTip Tip="Muxarr reads these flags back off the track name, so the change would not survive a rescan. Clear or edit the track name to apply it.">
+                            @if (warning is NoAudioLeft or VideoNotRemoved)
+                            {
                                 <i class="bi bi-exclamation-triangle me-2"></i>
-                            </ToolTip>@warning
+                            }
+                            else
+                            {
+                                <ToolTip Tip="Muxarr reads these flags back off the track name, so the change would not survive a rescan. Clear or edit the track name to apply it.">
+                                    <i class="bi bi-exclamation-triangle me-2"></i>
+                                </ToolTip>
+                            }
+                            @warning
                         </div>
                     }
                 </div>
@@ -319,6 +343,13 @@
         get
         {
             var parts = new List<string> { $"{_preview.Changed} file(s) will change" };
+            var removed = _preview.Results.Where(r => r.Plan != null && r.Outcome == BatchOutcome.Changed)
+                .Sum(r => r.File.Snapshot!.Tracks.Count - r.Plan!.Tracks.Count);
+            if (removed > 0)
+            {
+                parts.Add($"{removed} track(s) removed");
+            }
+
             if (_preview.Unchanged > 0)
             {
                 parts.Add($"{_preview.Unchanged} already match");
@@ -402,6 +433,33 @@
     {
         edit.Name = string.IsNullOrEmpty(name) ? null : name;
         Refresh();
+    }
+
+    // Removing makes the row's other edits moot, so they are dropped rather than
+    // left half-visible behind a disabled control.
+    private void ToggleRemove(BatchSlotEdit edit)
+    {
+        edit.Remove = !edit.Remove;
+        if (edit.Remove)
+        {
+            edit.LanguageName = null;
+            edit.Name = null;
+            edit.ClearName = false;
+            edit.IsDefault = null;
+            edit.IsForced = null;
+            edit.IsHearingImpaired = null;
+            edit.IsCommentary = null;
+            edit.IsDub = null;
+        }
+
+        Refresh();
+    }
+
+    private static string RemoveTip(BatchSlotEdit edit)
+    {
+        return edit.OnlyWhereLanguage == null
+            ? "Remove this track from every file"
+            : $"Remove this track where it is {edit.OnlyWhereLanguage}";
     }
 
     private void ToggleClearName(BatchSlotEdit edit)
